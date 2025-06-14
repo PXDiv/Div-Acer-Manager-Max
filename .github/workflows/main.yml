@@ -1,0 +1,140 @@
+name: Build and Publish Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_name:
+        description: 'Release name'
+        required: true
+      tag:
+        description: 'Tag (e.g., v1.0.0)'
+        required: true
+      prerelease:
+        description: 'Is this a prerelease?'
+        required: true
+        default: 'false'
+        type: choice
+        options:
+          - 'false'
+          - 'true'
+      git_commit:
+        description: 'Git commit SHA to reset to (optional)'
+        required: false
+        default: ''
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Optionally reset to specified commit
+        if: ${{ github.event.inputs.git_commit != '' }}
+        run: |
+          git reset --hard ${{ github.event.inputs.git_commit }}
+          git clean -fdx
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Install PyInstaller
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyinstaller
+
+      - name: Publish .NET GUI application
+        run: |
+          dotnet publish \
+            -c Release \
+            -f net9.0 \
+            -r linux-x64 \
+            --self-contained true \
+            /p:PublishSingleFile=true \
+            /p:IncludeNativeLibrariesForSelfExtract=true \
+            /p:IncludeAllContentForSelfExtract=true \
+            /p:DeleteExistingFiles=true \
+            -o ./publish
+
+      - name: Build DAMX-Daemon Python binary
+        run: |
+          pyinstaller --onefile --distpath ./DaemonPublish/ --clean DAMM-Daemon/DAMX-Daemon.py
+
+      - name: Prepare release folder structure
+        run: |
+          mkdir -p ./release/DAMX-GUI
+          mkdir -p ./release/DAMX-Daemon
+
+          # GUI: Copy main binary and icons
+          BIN=$(find ./publish -maxdepth 1 -type f -executable -name 'DivAcerManagerMax*' ! -name '*.pdb' | head -n1)
+          cp "$BIN" ./release/DAMX-GUI/
+          cp DivAcerManagerMax/icon.png ./release/DAMX-GUI/
+          cp DivAcerManagerMax/iconTransparent.png ./release/DAMX-GUI/
+
+          # Daemon: Copy only the pyinstaller binary
+          DAEMON_BIN=$(find ./DaemonPublish -maxdepth 1 -type f -executable -name 'DAMX-Daemon*' ! -name '*.py' | head -n1)
+          cp "$DAEMON_BIN" ./release/DAMX-Daemon/
+
+          # PDB: If present, copy for separate archive
+          if [ -f ./publish/DivAcerManagerMax.pdb ]; then
+            cp ./publish/DivAcerManagerMax.pdb ./release/
+          fi
+
+      - name: Package release archive (GUI + Daemon)
+        run: |
+          tar -C ./release -cf DAMX-${{ github.event.inputs.tag }}.tar DAMX-GUI DAMX-Daemon
+          xz -9e --threads=0 DAMX-${{ github.event.inputs.tag }}.tar
+
+      - name: Package PDB (if present)
+        run: |
+          if [ -f ./release/DivAcerManagerMax.pdb ]; then
+            tar -C ./release -cf DivAcerManagerMax.pdb.tar DivAcerManagerMax.pdb
+            xz -9e --threads=0 DivAcerManagerMax.pdb.tar
+          fi
+
+      - name: Upload DAMX archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: DAMX-archive
+          path: DAMX-${{ github.event.inputs.tag }}.tar.xz
+
+      - name: Upload PDB archive (if present)
+        if: ${{ hashFiles('DivAcerManagerMax.pdb.tar.xz') != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: DivAcerManagerMax-pdb
+          path: DivAcerManagerMax.pdb.tar.xz
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download DAMX archive
+        uses: actions/download-artifact@v4
+        with:
+          name: DAMX-archive
+
+      - name: Download PDB archive
+        if: always()
+        uses: actions/download-artifact@v4
+        with:
+          name: DivAcerManagerMax-pdb
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ github.event.inputs.release_name }}
+          tag_name: ${{ github.event.inputs.tag }}
+          prerelease: ${{ github.event.inputs.prerelease }}
+          files: |
+            DAMX-${{ github.event.inputs.tag }}.tar.xz
+            DivAcerManagerMax.pdb.tar.xz
