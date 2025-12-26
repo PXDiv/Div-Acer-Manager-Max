@@ -30,6 +30,7 @@ public partial class InternalsManager : Window
             "enable_all" => 3,
             _ => 0 // Default to "No Parameter" for empty string or unknown values
         };
+        ForceParameterPermanentlyComboBox.SelectionChanged += ForceParameterPermanently_OnSelectionChanged;
     }
 
     private void DevModeSwitch_OnClick(object? sender, RoutedEventArgs e)
