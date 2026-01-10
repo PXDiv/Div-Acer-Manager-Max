@@ -295,6 +295,35 @@ comprehensive_cleanup() {
   return 0
 }
 
+# Detect if kernel was compiled with LLVM/Clang (e.g., CachyOS, some Arch variants)
+is_llvm_kernel() {
+  if grep -qi "clang\|llvm" /proc/version 2>/dev/null; then
+    return 0
+  fi
+  if [ -f /etc/os-release ] && grep -qi "cachyos" /etc/os-release; then
+    return 0
+  fi
+  return 1
+}
+
+# Install build dependencies based on distribution
+install_build_deps() {
+  if command -v apt-get &> /dev/null; then
+    apt-get update && apt-get install -y build-essential linux-headers-$(uname -r)
+  elif command -v yum &> /dev/null; then
+    yum install -y gcc make kernel-devel
+  elif command -v dnf &> /dev/null; then
+    dnf install -y gcc make kernel-devel
+  elif command -v pacman &> /dev/null; then
+    pacman -S --needed --noconfirm base-devel linux-headers
+    if is_llvm_kernel; then
+      pacman -S --needed --noconfirm clang llvm lld
+    fi
+  elif command -v zypper &> /dev/null; then
+    zypper install -y gcc make kernel-devel
+  fi
+}
+
 install_drivers() {
   echo -e "${YELLOW}Installing Linuwu-Sense drivers...${NC}"
 
@@ -305,26 +334,24 @@ install_drivers() {
 
   cd "$EXTRACTED_DIR/Linuwu-Sense"
 
-  # Check if make is installed
+  # Install build dependencies if needed
   if ! command -v make &> /dev/null; then
     echo -e "${YELLOW}Installing build tools...${NC}"
-    if command -v apt-get &> /dev/null; then
-      apt-get update && apt-get install -y build-essential linux-headers-$(uname -r)
-    elif command -v yum &> /dev/null; then
-      yum install -y gcc make kernel-devel
-    elif command -v dnf &> /dev/null; then
-      dnf install -y gcc make kernel-devel
-    elif command -v pacman &> /dev/null; then
-      pacman -S --noconfirm base-devel linux-headers
-    elif command -v zypper &> /dev/null; then
-      zypper install -y gcc make kernel-devel
-    fi
+    install_build_deps
   fi
 
-  # Build and install drivers
-  make clean
-  make
-  make install
+  # Build with appropriate compiler for the kernel
+  if is_llvm_kernel; then
+    echo -e "${YELLOW}Detected LLVM-compiled kernel, using Clang...${NC}"
+    install_build_deps  # Ensure clang is installed
+    make clean LLVM=1 CC=clang
+    make LLVM=1 CC=clang
+    make install LLVM=1 CC=clang
+  else
+    make clean
+    make
+    make install
+  fi
 
   if [ $? -eq 0 ]; then
     echo -e "${GREEN}Linuwu-Sense drivers installed successfully!${NC}"
