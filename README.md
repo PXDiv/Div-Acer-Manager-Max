@@ -13,7 +13,6 @@
 
 ![Title Image](https://github.com/user-attachments/assets/a60898a6-a2b8-432e-b5a2-8d0a45c63484)
 
-
 <h4 align="center">
 ⭐ Please star this repository to show support. It motivates me to make the project better for everyone
 </h4>  
@@ -57,16 +56,15 @@
   * Dynamic UI hides unsupported features
   * Real-time feedback from daemon
 
-## 🧭 Compatibilty
-Check your deviced compatibility here: [Compatibility List](https://github.com/PXDiv/Div-Acer-Manager-Max/blob/main/Compatibility.md)
+## 🧭 Compatibility
 
-> Even if not here, DAMX will still work on most devices. Be sure to put a issue to request your model to be added in the compatiblity list if working.
+Check your device's compatibility here: [Compatibility List](https://github.com/PXDiv/Div-Acer-Manager-Max/blob/main/Compatibility.md)
 
+> Even if not here, DAMX will still work on most devices. Be sure to file an issue to request your model to be added in the compatibility list if working.
 
 ## 🖥️ DAMX Installation Guide
 
 You can install DAMX using either of the following methods:
-
 
 ### 🔗 Remote Installation
 
@@ -81,8 +79,6 @@ You can install DAMX using either of the following methods:
 3. Follow the on-screen prompts.
 
 4. Done!
-
-
 
 ### 📦 Local Installation (Alternative Method)
 
@@ -116,26 +112,25 @@ If the remote installation fails for some reason or you've gone offline, follow 
 
 6. Reboot your system after the installation completes.
 
-
 ✅ That’s it—you’re all set!
 
-
 ## 🖥️ Troubleshooting
+
 You can check the logs at /var/log/DAMX_Daemon_Log.log
 
-If you get UNKNOWN as Laptop type, try restarting (it happens somethings) 
-But if it still happenes that might mean the Drivers Installation failed, Make sure you have the approprite kernel headers to compile the drivers.
+If you get UNKNOWN as Laptop type, try restarting (it happens sometimes)
+But if it still happens that might mean the Drivers Installation failed, Make sure you have the appropriate kernel headers to compile the drivers.
 
 Also, check out the [FAQ page](https://github.com/PXDiv/Div-Acer-Manager-Max/blob/main/FAQ.md) before opening any issues.
 
 Please open a new issue or discussion and include the logs to get support and help the project grow if you need any info, report a bug or just give ideas for the future versions of DAMX
 
-## Screenshots 
+## Screenshots
+
 ![image](https://github.com/user-attachments/assets/10d44e8c-14e4-4441-b60c-538af1840cf6)
 ![image](https://github.com/user-attachments/assets/89217b26-b94c-4c78-8fe8-3de2b22a7095)
 ![image](https://github.com/user-attachments/assets/72a7b944-5efc-4520-83b6-88069fc05723)
 ![image](https://github.com/user-attachments/assets/f9a9d663-70c6-482e-a0c4-15a4ea08a8d2)
-
 
 ## ❤️ Powered by Linuwu
 
@@ -146,8 +141,6 @@ The custom drivers for this project [Div-Linuwu Sense project](https://github.co
 * Report bugs or request features via GitHub Issues
 * Submit pull requests to improve code or UI
 * Help test on different Acer laptop models
-
-
 
 ## 📄 License
 
