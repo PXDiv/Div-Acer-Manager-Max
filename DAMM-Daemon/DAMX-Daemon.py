@@ -644,7 +644,7 @@ class DAMXManager:
             log.error(f"Invalid brightness. Must be between 0 and 100: {brightness}")
             return False
 
-        value = f"{zone1},{zone2},{zone3},{zone4},{brightness}"
+        value = f"{zone1},{zone2},{zone3},{zone4},{brightness}\n"
         return self._write_file(
             "/sys/module/linuwu_sense/drivers/platform:acer-wmi/acer-wmi/four_zoned_kb/per_zone_mode",
             value
@@ -692,7 +692,7 @@ class DAMXManager:
             log.error(f"Invalid RGB values. Must be between 0 and 255: {red},{green},{blue}")
             return False
 
-        value = f"{mode},{speed},{brightness},{direction},{red},{green},{blue}"
+        value = f"{mode},{speed},{brightness},{direction},{red},{green},{blue}\n"
         return self._write_file(
             "/sys/module/linuwu_sense/drivers/platform:acer-wmi/acer-wmi/four_zoned_kb/four_zone_mode",
             value
