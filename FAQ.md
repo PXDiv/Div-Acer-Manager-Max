@@ -33,6 +33,11 @@ This is usually caused by model detection issues:
 * **Distro Compatibility Issues**:
   The DAMX project is officially tested and supported on **Ubuntu only**. Other Linux distributions might introduce kernel or library incompatibilities, leading to missing features in the GUI.
 
+  For **Arch-based distributions**, make sure the following packages are installed:
+
+  ```bash
+  sudo pacman -S linux-headers clang llvm lld
+  ```
 ---
 
 ### 🛑 It Shows "Unknown Model" and My Model Isn’t in the Compatibility List
