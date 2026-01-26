@@ -24,6 +24,7 @@ Please also check out the [FAQ Page](https://github.com/PXDiv/Div-Acer-Manager-M
 | AN16-43             | ✅ Supported            | Fully functional on supported kernels.                           |
 | **PHN16-71**        | ✅ Supported |  Per Key Keyboard lighting maybe not working properly.                 |
 | PHN16-72            | ✅ Supported            | Uses same quirk profile as PHN16-71 but no known lighting issue. |
+| PH16-72             | ✅ Supported            | Uses universal Predator V4 quirk. (No Lighting Settings, Profiles Do not work)|
 | PH16-71             | ✅ Supported            | Uses universal Predator V4 quirk.                                |
 | PH18-71             | ✅ Supported            | Uses universal Predator V4 quirk.                                |
 | PH315-53            | ✅ Supported            | Known stable, uses dedicated quirk.                              |
