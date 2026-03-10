@@ -19,6 +19,7 @@ from pathlib import Path
 from enum import Enum
 from PowerSourceDetection import PowerSourceDetector 
 from typing import Dict, List, Tuple, Set
+import shutil
 # from KeyboardMonitor import KeyboardMonitor
 
 # Constants
@@ -1218,6 +1219,27 @@ class DaemonServer:
                         "error": "Failed to Restart DAMX daemon (Check logs for details)"
                     }           
 
+            elif command == "set_gpu_mode":
+                # Get param. from interface
+                mode = params.get("mode", "")
+                
+                # Security Check, just these mods
+                if mode not in ["integrated", "nvidia", "hybrid"]:
+                    return {
+                        "success": False,
+                        "error": f"Unvalid GPU Mode: {mode}. It must be - 'integrated', 'nvidia' or 'hybrid'"
+                    }
+                
+               
+                success = change_gpu_mode(mode)
+                
+                # Send to GUI
+                return {
+                    "success": success,
+                    "data": {"mode": mode} if success else None,
+                    "error": "An error occured while GPU changing..." if not success else None
+                }
+            
             elif command == "restart_drivers_and_daemon":
                 # Restart linuwu-sense driver and DAMX daemon service
                 success = self.manager._restart_drivers_and_daemon()
@@ -1408,6 +1430,34 @@ def signal_handler(self, sig, frame):
     # Ensure socket is cleaned up
     if hasattr(self, 'server') and self.server:
         self.server.cleanup_socket()
+
+def change_gpu_mode(mode):
+    """
+    Change GPU Mode. 
+    Modes: 'integrated', 'nvidia', 'hybrid'
+    """
+    try:
+        # 1. If System has "system76"
+        if shutil.which("system76-power"):
+            print(f"[GPU] system76-power algılandı. Mod değiştiriliyor: {mode}")
+            subprocess.run(["system76-power", "graphics", mode], check=True)
+            return True
+            
+        # 2. If System has "envycontrol"
+        elif shutil.which("envycontrol"):
+            print(f"[GPU] envycontrol algılandı. Mod değiştiriliyor: {mode}")
+            subprocess.run(["envycontrol", "-s", mode], check=True)
+            return True
+            
+        # Error
+        else:
+            print("[GPU HATA] Uyumlu bir ekran kartı yönetim aracı bulunamadı!")
+            return False
+            
+    except subprocess.CalledProcessError as e:
+        print(f"[GPU HATA] Mod değiştirilirken bir sorun oluştu: {e}")
+        return False
+    
 
 def main():
     """Main function"""

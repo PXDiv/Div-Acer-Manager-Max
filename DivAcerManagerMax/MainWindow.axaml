@@ -545,6 +545,21 @@
                                               Content="Enable boot animation and sound" IsChecked="False" Margin="0 10" />
                                 </StackPanel>
                             </Border>
+                            
+                            <!-- GPU Switch -->
+                            <Border Classes="Card" Margin="0,0,0,15">
+                                <StackPanel>
+                                 <TextBlock Text="Graphics Mode" Classes="SubHeader" Margin="0,0,0,5"/>
+                                 <TextBlock Text="Select the active graphics card" Opacity="0.7" Margin="0,0,0,15"/>
+                    
+                                 <StackPanel Orientation="Horizontal" Spacing="10">
+                                  <Button Name="BtnGpuIntegrated" Content="🔋 Integrated" Width="180" HorizontalContentAlignment="Center" Click="BtnGpuMode_Click"/>
+                                  <Button Name="BtnGpuHybrid" Content="⚖️ Hybrid" Width="180" HorizontalContentAlignment="Center" Click="BtnGpuMode_Click"/>
+                                  <Button Name="BtnGpuNvidia" Content="🎮 Nvidia" Width="180" HorizontalContentAlignment="Center" Click="BtnGpuMode_Click"/>
+                                 </StackPanel>
+                                </StackPanel>
+                           </Border>
+
 
                             <!-- System Information -->
                             <Border Classes="Card">

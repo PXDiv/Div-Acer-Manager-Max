@@ -592,6 +592,57 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         internalsManagerWindow.ShowDialog(this);
     }
 
+    // GPU Switch(Event Handler)
+    public async void BtnGpuMode_Click(object sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        // 1. Cancel if app does not connect to the Daemon
+        if (!_isConnected) 
+        {
+            await ShowMessageBox("Error", "You are not connected to the Daemon. Please Check your connection.");
+            return;
+        }
+
+        // 2. Convert to btn
+        if (sender is not Avalonia.Controls.Button btn) return;
+
+        // 3. 
+        string mode = "hybrid"; // default gpu mode
+        
+        if (btn.Name == "BtnGpuIntegrated") 
+            mode = "integrated";
+        else if (btn.Name == "BtnGpuNvidia") 
+            mode = "nvidia";
+
+        // 4. Kullanıcıya kritik X11/Wayland uyarısını göster
+        var box = MessageBoxManager.GetMessageBoxStandard(
+            "You will be logged out", 
+            $"GPU Mode: '{mode}' \nYou need to log out for apply the mode\n\nDo You Want to log out?",
+            MsBox.Avalonia.Enums.ButtonEnum.YesNo);
+            
+        var result = await box.ShowWindowDialogAsync(this);
+        
+        // 5. IF answer is yes
+        if (result == MsBox.Avalonia.Enums.ButtonResult.Yes)
+        {
+            // Get value from DAMXClient.cs 
+            bool success = await _client.SetGpuModeAsync(mode);
+
+            if (success)
+            {
+                //Log out order
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = "gnome-session-quit",
+                    Arguments = "--logout --no-prompt",
+                    UseShellExecute = false
+                });
+            }
+            else
+            {
+                await ShowMessageBox("Error", "GPU Couldn't change. Check your settings");
+            }
+        }
+    }
 
     private async void ProfileButton_Checked(object sender, RoutedEventArgs e)
     {

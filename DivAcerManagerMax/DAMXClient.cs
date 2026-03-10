@@ -472,6 +472,26 @@ public class DAMXClient : IDisposable
         return response.RootElement.GetProperty("success").GetBoolean();
     }
 
+    /// <summary>
+    ///     Set GPU Graphics Mode (Integrated, Nvidia, Hybrid)
+    /// </summary>
+    /// <param name="mode">Graphics mode to switch to</param>
+    /// <returns>True if successful</returns>
+    public async Task<bool> SetGpuModeAsync(string mode)
+    {
+        // Şimdilik özellik destekleniyor mu (IsFeatureAvailable) kontrolü yap, 
+        // çünkü bu özellik Daemon'daki "available_features" listesine henüz yok. 
+        // Doğrudan Daemon'a gönderiyoruz.
+
+        var parameters = new Dictionary<string, object>
+        {
+            { "mode", mode }
+        };
+
+        var response = await SendCommandAsync("set_gpu_mode", parameters);
+        return response.RootElement.GetProperty("success").GetBoolean();
+    }
+
     protected virtual void Dispose(bool disposing)
     {
         if (_disposed) return;
