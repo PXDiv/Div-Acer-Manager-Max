@@ -11,6 +11,8 @@ using Avalonia.Interactivity;
 using Avalonia.Markup.Xaml;
 using Avalonia.Media;
 using MsBox.Avalonia;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace DivAcerManagerMax;
 
@@ -345,6 +347,28 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         {
             _settings = await _client.GetAllSettingsAsync() ?? new DAMXSettings();
             ApplySettingsToUI();
+            // --- Load Preferences ---
+            var prefs = LoadUserPreferences();
+            
+            // 1. Load Last Thermal Profile
+            if (!string.IsNullOrEmpty(prefs.LastThermalProfile))
+            {
+                await _client.SetThermalProfileAsync(prefs.LastThermalProfile);
+            }
+
+            // 2. Load Manual Fan Speeds if Manual Mode was active
+            if (prefs.WasManualFanControl)
+            {
+                _cpuFanSpeed = prefs.LastCpuFanSpeed;
+                _gpuFanSpeed = prefs.LastGpuFanSpeed;
+                await _client.SetFanSpeedAsync(_cpuFanSpeed, _gpuFanSpeed);
+                
+                // Update UI to reflect manual mode and speeds
+                if (_manualFanSpeedRadioButton != null) _manualFanSpeedRadioButton.IsChecked = true;
+                if (_cpuFanSlider != null) _cpuFanSlider.Value = _cpuFanSpeed;
+                if (_gpuFanSlider != null) _gpuFanSlider.Value = _gpuFanSpeed;
+            }
+            // -----------------------------------
         }
         catch (Exception ex)
         {
@@ -535,6 +559,51 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
     }
 
+    private readonly string _prefsFilePath = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), 
+        ".config", "damx", "user_prefs.json");
+
+    private void SaveUserPreferences(string profile = null)
+    {
+        try
+        {
+            var dir = Path.GetDirectoryName(_prefsFilePath);
+            if (!Directory.Exists(dir)) Directory.CreateDirectory(dir);
+
+            var prefs = new UserPreferences
+            {
+                LastThermalProfile = profile ?? _settings?.ThermalProfile?.Current ?? "balanced",
+                LastCpuFanSpeed = _cpuFanSpeed,
+                LastGpuFanSpeed = _gpuFanSpeed,
+                WasManualFanControl = _isManualFanControl
+            };
+
+            var json = JsonSerializer.Serialize(prefs, new JsonSerializerOptions { WriteIndented = true });
+            File.WriteAllText(_prefsFilePath, json);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error saving preferences: {ex.Message}");
+        }
+    }
+
+    private UserPreferences LoadUserPreferences()
+    {
+        try
+        {
+            if (File.Exists(_prefsFilePath))
+            {
+                var json = File.ReadAllText(_prefsFilePath);
+                return JsonSerializer.Deserialize<UserPreferences>(json) ?? new UserPreferences();
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error loading preferences: {ex.Message}");
+        }
+        return new UserPreferences();
+    }
+
     private void ApplyKeyboardSettings()
     {
         if (_settings.HasFourZoneKb)
@@ -659,6 +728,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         };
 
         await _client.SetThermalProfileAsync(profile);
+        SaveUserPreferences(profile);
 
         if (profile == "quiet")
         {
@@ -725,6 +795,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     {
         if (_isConnected)
             await _client.SetFanSpeedAsync(_cpuFanSpeed, _gpuFanSpeed);
+            SaveUserPreferences();
     }
 
     private async void AutoFanSpeedRadioButtonClick(object sender, RoutedEventArgs e)
@@ -734,6 +805,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             await _client.SetFanSpeedAsync(0, 0);
             _isManualFanControl = false;
             if (_manualFanSpeedRadioButton != null) _manualFanSpeedRadioButton.IsChecked = false;
+            SaveUserPreferences();
             await LoadSettingsAsync();
         }
     }
@@ -881,3 +953,16 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     #endregion
 }
+
+
+
+
+// This class is used to store user preferences locally, such as the last selected thermal profile and fan speeds. It can be extended in the future to include more preferences as needed.
+public class UserPreferences
+{
+    public string LastThermalProfile { get; set; } = "balanced";
+    public int LastCpuFanSpeed { get; set; } = 50;
+    public int LastGpuFanSpeed { get; set; } = 70;
+    public bool WasManualFanControl { get; set; } = false;
+}
+
