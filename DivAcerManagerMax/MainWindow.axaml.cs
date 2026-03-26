@@ -76,12 +76,16 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private ColorPicker _zone3ColorPicker;
     private ColorPicker _zone4ColorPicker;
 
+    // UI kod tarafından güncellenirken Daemon'a gereksiz komut gitmesini engeller
+    private bool _isUpdatingUI = false;
+
     public MainWindow()
     {
         InitializeComponent();
         DataContext = this;
         _client = new DAMXClient();
         Loaded += MainWindow_Loaded;
+        Closing += MainWindow_Closing;
     }
 
     public bool IsCalibrating
@@ -101,6 +105,23 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         AttachEventHandlers();
         InitializeAsync();
     }
+
+    private bool _isForceClosing = false; 
+    private void MainWindow_Closing(object? sender, WindowClosingEventArgs e)
+    {
+        if (!_isForceClosing)
+        {
+            e.Cancel = true; 
+            this.Hide();     
+        }
+    }
+    public void ForceQuitApplication()
+    {
+        _isForceClosing = true;
+        this.Close();
+        Environment.Exit(0);
+    }
+
 
     private void BindControls()
     {
@@ -430,9 +451,15 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             var currentProfileKey = _settings.ThermalProfile.Current.ToLower();
             if (profileConfigs.TryGetValue(currentProfileKey, out var config) && config.button?.IsEnabled == true)
             {
-                config.button.IsChecked = true;
-                if (_thermalProfileInfoText != null)
-                    _thermalProfileInfoText.Text = config.description;
+                // ZIRHI KALDIR (Arayüzü biz güncelliyoruz, Daemon'a haber verme)
+                _isUpdatingUI = true; 
+            
+             config.button.IsChecked = true;
+              if (_thermalProfileInfoText != null)
+                _thermalProfileInfoText.Text = config.description;
+                
+              // ZIRHI İNDİR (Artık kullanıcı tıklamalarını dinleyebiliriz)
+              _isUpdatingUI = false; 
             }
         }
     }
@@ -715,6 +742,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private async void ProfileButton_Checked(object sender, RoutedEventArgs e)
     {
+
+        if(_isUpdatingUI) return; // ZIRHI KALDIR (UI güncellenirken tetiklenen olayları yoksay)
+        
         if (!_isConnected || sender is not RadioButton button || button.IsChecked != true) return;
 
         var profile = button.Name switch
