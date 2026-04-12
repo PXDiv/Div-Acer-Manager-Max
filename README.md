@@ -60,7 +60,7 @@
 
 Check your device's compatibility here: [Compatibility List](https://github.com/PXDiv/Div-Acer-Manager-Max/blob/main/Compatibility.md)
 
-> Even if not here, DAMX will still work on most devices. Be sure to file an issue to request your model to be added in the compatibility list if working.
+> Even if not here, DAMX will still work on most devices. Please file a issue on Linuwu-sense page (it will be ignored here)
 
 ## 🖥️ DAMX Installation Guide
 
