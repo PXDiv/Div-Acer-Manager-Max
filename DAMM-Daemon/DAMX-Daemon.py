@@ -151,14 +151,14 @@ class DAMXManager:
 
         try:
             # Remove the module
-            subprocess.run(['sudo', 'rmmod', 'linuwu-sense'], check=True)
+            subprocess.run(['sudo', 'rmmod', 'linuwu_sense'], check=True)
             log.info("Successfully removed linuwu-sense module")
             
             # Wait a moment
             time.sleep(2)
             
             # Reload the module
-            subprocess.run(['sudo', 'modprobe', 'linuwu-sense', 'nitro_v4'], check=True)
+            subprocess.run(['sudo', 'modprobe', 'linuwu_sense', 'nitro_v4'], check=True)
             log.info("Successfully reloaded linuwu-sense module")
             
             # Wait a moment for module to initialize
@@ -176,48 +176,48 @@ class DAMXManager:
         
 
     def _force_model_predator(self):
-        """Restart linuwu-sense driver and DAMX daemon service with nitro_v4 parameter"""
-        log.info("Forcing model detection to Nitro by restarting drivers and daemon")
+        """Restart linuwu-sense driver and DAMX daemon service with predator_v4 parameter"""
+        log.info("Forcing model detection to Predator by restarting drivers and daemon")
 
         try:
             # Remove the module
-            subprocess.run(['sudo', 'rmmod', 'linuwu-sense'], check=True)
+            subprocess.run(['sudo', 'rmmod', 'linuwu_sense'], check=True)
             log.info("Successfully removed linuwu-sense module")
             
             # Wait a moment
             time.sleep(2)
             
             # Reload the module
-            subprocess.run(['sudo', 'modprobe', 'linuwu-sense', 'predator_v4'], check=True)
+            subprocess.run(['sudo', 'modprobe', 'linuwu_sense', 'predator_v4'], check=True)
             log.info("Successfully reloaded linuwu-sense module")
-            
+
             # Wait a moment for module to initialize
             time.sleep(3)
-            
+
             # Restart the daemon service
             log.info("Restarting DAMX daemon service (may produce an error)")
             subprocess.run(['sudo', 'systemctl', 'restart', 'damx-daemon.service'], check=True)
-            
+
             return True
-        
+
         except Exception as e:
-            log.error(f"Unexpected error while Forcing Nitro Model: {e}")
+            log.error(f"Unexpected error while Forcing Predator Model: {e}")
             return False
-    
+
     def _force_enable_all(self):
         """Restart linuwu-sense driver and DAMX daemon service with enable_all parameter"""
         log.info("Forcing all features by restarting daemon and drivers with parameter enable_all")
 
         try:
             # Remove the module
-            subprocess.run(['sudo', 'rmmod', 'linuwu-sense'], check=True)
+            subprocess.run(['sudo', 'rmmod', 'linuwu_sense'], check=True)
             log.info("Successfully removed linuwu-sense module")
             
             # Wait a moment
             time.sleep(2)
             
             # Reload the module
-            subprocess.run(['sudo', 'modprobe', 'linuwu-sense', 'enable_all'], check=True)
+            subprocess.run(['sudo', 'modprobe', 'linuwu_sense', 'enable_all'], check=True)
             log.info("Successfully reloaded linuwu-sense module with enable_all parameter")
             
             # Wait a moment for module to initialize
@@ -324,14 +324,14 @@ class DAMXManager:
         
         try:
             # Remove the module
-            subprocess.run(['sudo', 'rmmod', 'linuwu-sense'], check=True)
+            subprocess.run(['sudo', 'rmmod', 'linuwu_sense'], check=True)
             log.info("Successfully removed linuwu-sense module")
             
             # Wait a moment
             time.sleep(2)
             
             # Reload the module
-            subprocess.run(['sudo', 'modprobe', 'linuwu-sense'], check=True)
+            subprocess.run(['sudo', 'modprobe', 'linuwu_sense'], check=True)
             log.info("Successfully reloaded linuwu-sense module")
             
             # Wait a moment for module to initialize
