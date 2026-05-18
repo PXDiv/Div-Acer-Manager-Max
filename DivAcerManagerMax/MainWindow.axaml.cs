@@ -17,7 +17,7 @@ namespace DivAcerManagerMax;
 public partial class MainWindow : Window, INotifyPropertyChanged
 {
     private readonly string _effectColor = "#0078D7";
-    private readonly string ProjectVersion = "0.9.1";
+    private readonly string ProjectVersion = "1.0.0";
 
     // UI Controls (will be bound via NameScope)
     private Button _applyKeyboardColorsButton;
