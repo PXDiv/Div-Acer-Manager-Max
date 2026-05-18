@@ -16,22 +16,29 @@ namespace DivAcerManagerMax;
 
 public partial class MainWindow : Window, INotifyPropertyChanged
 {
-    private static readonly string KeyboardZonePresetPath =
+    private const string ProjectVersion = "1.0.0";
+    private const string DefaultEffectColor = "#0078D7";
+    private const string DefaultZone1Color = "#4287f5";
+    private const string DefaultZone2Color = "#ff5733";
+    private const string DefaultZone3Color = "#33ff57";
+    private const string DefaultZone4Color = "#ffff01";
+    private const int DirectionLeftToRight = 1;
+    private const int DirectionRightToLeft = 2;
+    private const string AppDataFolderName = "DivAcerManagerMax";
+    private const string KeyboardZonePresetFileName = "keyboard-zone-colors.conf";
+    private const string KeyboardLightingEffectPresetFileName = "keyboard-lighting-effect.conf";
+
+    private static readonly string AppDataFolderPath =
         Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-            "DivAcerManagerMax",
-            "keyboard-zone-colors.conf"
+            AppDataFolderName
         );
+
+    private static readonly string KeyboardZonePresetPath =
+        Path.Combine(AppDataFolderPath, KeyboardZonePresetFileName);
 
     private static readonly string KeyboardLightingEffectPresetPath =
-        Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-            "DivAcerManagerMax",
-            "keyboard-lighting-effect.conf"
-        );
-
-    private readonly string _effectColor = "#0078D7";
-    private readonly string ProjectVersion = "1.0.0";
+        Path.Combine(AppDataFolderPath, KeyboardLightingEffectPresetFileName);
 
     // UI Controls (will be bound via NameScope)
     private Button _applyKeyboardColorsButton;
@@ -55,6 +62,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private bool _isCalibrating;
     private bool _isConnected;
     private bool _isManualFanControl;
+    private bool _isSettingFanSpeed;
     private int _keyboardBrightness = 100;
     private Slider _keyBrightnessSlider;
     private TextBlock _keyBrightnessText;
@@ -433,92 +441,114 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     {
         UpdateProfileButtons();
 
-        if (_backlightTimeoutCheckBox != null)
-            _backlightTimeoutCheckBox.IsChecked =
-                (_settings.BacklightTimeout ?? "0").Equals("1", StringComparison.OrdinalIgnoreCase);
+        SetCheckBox(_backlightTimeoutCheckBox, IsEnabledSetting(_settings.BacklightTimeout));
+        SetCheckBox(_batteryLimitCheckBox, IsEnabledSetting(_settings.BatteryLimiter));
 
-        if (_batteryLimitCheckBox != null)
-            _batteryLimitCheckBox.IsChecked =
-                (_settings.BatteryLimiter ?? "0").Equals("1", StringComparison.OrdinalIgnoreCase);
-
-        var isCalibrating = (_settings.BatteryCalibration ?? "0").Equals("1", StringComparison.OrdinalIgnoreCase);
+        var isCalibrating = IsEnabledSetting(_settings.BatteryCalibration);
         IsCalibrating = isCalibrating;
-        if (_startCalibrationButton != null) _startCalibrationButton.IsEnabled = !isCalibrating;
-        if (_stopCalibrationButton != null) _stopCalibrationButton.IsEnabled = isCalibrating;
-        if (_calibrationStatusTextBlock != null)
-            _calibrationStatusTextBlock.Text = isCalibrating ? "Status: Calibrating" : "Status: Not calibrating";
+        SetEnabled(_startCalibrationButton, !isCalibrating);
+        SetEnabled(_stopCalibrationButton, isCalibrating);
+        SetText(_calibrationStatusTextBlock, isCalibrating ? "Status: Calibrating" : "Status: Not calibrating");
 
-        if (_bootAnimAndSoundCheckBox != null)
-            _bootAnimAndSoundCheckBox.IsChecked =
-                (_settings.BootAnimationSound ?? "0").Equals("1", StringComparison.OrdinalIgnoreCase);
-
-        if (_lcdOverrideCheckBox != null)
-            _lcdOverrideCheckBox.IsChecked =
-                (_settings.LcdOverride ?? "0").Equals("1", StringComparison.OrdinalIgnoreCase);
+        SetCheckBox(_bootAnimAndSoundCheckBox, IsEnabledSetting(_settings.BootAnimationSound));
+        SetCheckBox(_lcdOverrideCheckBox, IsEnabledSetting(_settings.LcdOverride));
 
         if (_usbChargingComboBox != null)
-        {
-            var usbChargingIndex = _settings.UsbCharging switch
-            {
-                "10" => 1,
-                "20" => 2,
-                "30" => 3,
-                _ => 0
-            };
-            _usbChargingComboBox.SelectedIndex = usbChargingIndex;
-        }
+            _usbChargingComboBox.SelectedIndex = GetUsbChargingIndex(_settings.UsbCharging);
 
-        if (int.TryParse(_settings.FanSpeed?.Cpu ?? "0", out var cpuSpeed))
-        {
-            _cpuFanSpeed = cpuSpeed;
-            if (_cpuFanSlider != null)
-            {
-                _cpuFanSlider.Value = cpuSpeed;
-                if (_cpuFanTextBlock != null)
-                    _cpuFanTextBlock.Text = cpuSpeed == 0 ? "Auto" : $"{cpuSpeed}%";
-            }
-        }
+        var cpuSpeed = ApplyFanSpeed(_settings.FanSpeed?.Cpu, ref _cpuFanSpeed, _cpuFanSlider, _cpuFanTextBlock);
+        var gpuSpeed = ApplyFanSpeed(_settings.FanSpeed?.Gpu, ref _gpuFanSpeed, _gpuFanSlider, _gpuFanTextBlock);
 
-        if (int.TryParse(_settings.FanSpeed?.Gpu ?? "0", out var gpuSpeed))
-        {
-            _gpuFanSpeed = gpuSpeed;
-            if (_gpuFanSlider != null)
-            {
-                _gpuFanSlider.Value = gpuSpeed;
-                if (_gpuFanTextBlock != null)
-                    _gpuFanTextBlock.Text = gpuSpeed == 0 ? "Auto" : $"{gpuSpeed}%";
-            }
-        }
+        var isAutoMode = cpuSpeed == 0 && gpuSpeed == 0;
+        var isMaxMode = cpuSpeed == 100 && gpuSpeed == 100;
+        var isManualMode = !isAutoMode && !isMaxMode;
 
-        var isManualMode = cpuSpeed > 0 || gpuSpeed > 0;
         _isManualFanControl = isManualMode;
-        if (_manualFanSpeedRadioButton != null) _manualFanSpeedRadioButton.IsChecked = isManualMode;
-        if (_autoFanSpeedRadioButton != null) _autoFanSpeedRadioButton.IsChecked = !isManualMode;
+
+        if (_autoFanSpeedRadioButton != null)
+            _autoFanSpeedRadioButton.IsChecked = isAutoMode;
+
+        if (_maxFanSpeedRadioButton != null)
+            _maxFanSpeedRadioButton.IsChecked = isMaxMode;
+
+        if (_manualFanSpeedRadioButton != null)
+            _manualFanSpeedRadioButton.IsChecked = isManualMode;
 
         ApplyKeyboardSettings();
 
-        if (_keyBrightnessText != null)
-            _keyBrightnessText.Text = $"{_keyboardBrightness}%";
-
-        if (_lightSpeedTextBlock != null)
-            _lightSpeedTextBlock.Text = _lightingSpeed.ToString();
-
-        if (_daemonVersionText != null)
-            _daemonVersionText.Text = $"v{_settings.Version}";
-
-        if (_driverVersionText != null)
-            _driverVersionText.Text = $"v{_settings.DriverVersion}";
-
-        if (_laptopTypeText != null)
-            _laptopTypeText.Text = _settings.LaptopType;
-
-        if (_supportedFeaturesTextBlock != null)
-            _supportedFeaturesTextBlock.Text = string.Join(", ", _settings.AvailableFeatures);
-
-        if (_modelNameText != null)
-            _modelNameText.Text = GetLinuxLaptopModel();
+        SetText(_keyBrightnessText, $"{_keyboardBrightness}%");
+        SetText(_lightSpeedTextBlock, _lightingSpeed.ToString());
+        SetText(_daemonVersionText, $"v{_settings.Version}");
+        SetText(_driverVersionText, $"v{_settings.DriverVersion}");
+        SetText(_laptopTypeText, _settings.LaptopType);
+        SetText(_supportedFeaturesTextBlock, string.Join(", ", _settings.AvailableFeatures));
+        SetText(_modelNameText, GetLinuxLaptopModel());
 
         UpdateUIElementVisibility();
+    }
+
+    private static bool IsEnabledSetting(string? value)
+    {
+        return (value ?? "0").Equals("1", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static int GetUsbChargingIndex(string? value)
+    {
+        return value switch
+        {
+            "10" => 1,
+            "20" => 2,
+            "30" => 3,
+            _ => 0
+        };
+    }
+
+    private static int ApplyFanSpeed(
+        string? value,
+        ref int backingField,
+        Slider? slider,
+        TextBlock? textBlock)
+    {
+        if (!int.TryParse(value ?? "0", out var speed))
+            return 0;
+
+        backingField = speed;
+
+        if (slider != null)
+            slider.Value = speed;
+
+        SetText(textBlock, FormatFanSpeed(speed));
+
+        return speed;
+    }
+
+    private static string FormatFanSpeed(int speed)
+    {
+        return speed == 0 ? "Auto" : $"{speed}%";
+    }
+
+    private static void SetCheckBox(CheckBox? checkBox, bool value)
+    {
+        if (checkBox != null)
+            checkBox.IsChecked = value;
+    }
+
+    private static void SetRadioButton(RadioButton? radioButton, bool value)
+    {
+        if (radioButton != null)
+            radioButton.IsChecked = value;
+    }
+
+    private static void SetEnabled(Control? control, bool value)
+    {
+        if (control != null)
+            control.IsEnabled = value;
+    }
+
+    private static void SetText(TextBlock? textBlock, string? value)
+    {
+        if (textBlock != null)
+            textBlock.Text = value ?? string.Empty;
     }
 
     private string GetLinuxLaptopModel()
@@ -578,13 +608,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         SetColorPicker(_zone3ColorPicker, zone3);
         SetColorPicker(_zone4ColorPicker, zone4);
 
-        _keyboardBrightness = brightness;
-
-        if (_keyBrightnessSlider != null)
-            _keyBrightnessSlider.Value = brightness;
-
-        if (_keyBrightnessText != null)
-            _keyBrightnessText.Text = $"{brightness}%";
+        SetKeyboardBrightness(brightness);
     }
 
     private void ApplyFourZoneSettingsToUI()
@@ -603,24 +627,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         if (_lightingModeComboBox != null)
             _lightingModeComboBox.SelectedIndex = mode;
 
-        _lightingSpeed = speed;
+        SetLightingSpeed(speed);
+        SetKeyboardBrightness(brightness);
 
-        if (_lightingSpeedSlider != null)
-            _lightingSpeedSlider.Value = speed;
-
-        if (_lightSpeedTextBlock != null)
-            _lightSpeedTextBlock.Text = speed.ToString();
-
-        _keyboardBrightness = brightness;
-
-        if (_keyBrightnessSlider != null)
-            _keyBrightnessSlider.Value = brightness;
-
-        if (_keyBrightnessText != null)
-            _keyBrightnessText.Text = $"{brightness}%";
-
-        // Driver uses 1 = left-to-right, 2 = right-to-left.
-        // Your UI only needs to set the left-to-right radio; the other one follows through GroupName.
         SetDirectionRadioButtons(direction);
 
         // Mode 2 / Neon often reports 0,0,0. Do not overwrite the color picker with black for that.
@@ -756,8 +765,32 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private async void SetManualSpeedButton_OnClick(object sender, RoutedEventArgs e)
     {
-        if (_isConnected)
+        if (!_isConnected || _isSettingFanSpeed)
+            return;
+
+        _isSettingFanSpeed = true;
+
+        if (_setManualSpeedButton != null)
+            _setManualSpeedButton.IsEnabled = false;
+
+        try
+        {
             await _client.SetFanSpeedAsync(_cpuFanSpeed, _gpuFanSpeed);
+        }
+        catch (Exception ex)
+        {
+            await ShowMessageBox(
+                "Fan Speed Error",
+                $"Failed to set fan speed: {ex.Message}"
+            );
+        }
+        finally
+        {
+            _isSettingFanSpeed = false;
+
+            if (_setManualSpeedButton != null)
+                _setManualSpeedButton.IsEnabled = true;
+        }
     }
 
     private async void AutoFanSpeedRadioButtonClick(object sender, RoutedEventArgs e)
@@ -773,8 +806,26 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private async void MaxFanSpeedRadioButton_OnClick(object? sender, RoutedEventArgs e)
     {
-        if (_isConnected)
-            await _client.SetFanSpeedAsync(100, 100);
+        if (!_isConnected)
+            return;
+
+        _cpuFanSpeed = 100;
+        _gpuFanSpeed = 100;
+        _isManualFanControl = false;
+
+        if (_cpuFanSlider != null)
+            _cpuFanSlider.Value = 100;
+
+        if (_gpuFanSlider != null)
+            _gpuFanSlider.Value = 100;
+
+        if (_cpuFanTextBlock != null)
+            _cpuFanTextBlock.Text = "100%";
+
+        if (_gpuFanTextBlock != null)
+            _gpuFanTextBlock.Text = "100%";
+
+        await _client.SetFanSpeedAsync(100, 100);
     }
 
     private async void StartCalibrationButton_Click(object sender, RoutedEventArgs e)
@@ -808,11 +859,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private void KeyboardBrightnessSlider_ValueChanged(object sender, AvaloniaPropertyChangedEventArgs e)
     {
         if (e.Property == Slider.ValueProperty)
-        {
-            _keyboardBrightness = Convert.ToInt32(e.NewValue);
-            if (_keyBrightnessText != null)
-                _keyBrightnessText.Text = $"{_keyboardBrightness}%";
-        }
+            SetKeyboardBrightness(Convert.ToInt32(e.NewValue), false);
     }
 
     private async void ApplyKeyboardColorsButton_Click(object sender, RoutedEventArgs e)
@@ -820,10 +867,10 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         if (_isConnected && _settings.HasFourZoneKb)
         {
             await _client.SetPerZoneModeAsync(
-                ToRgbHex(_zone1ColorPicker?.Color ?? Color.Parse("#4287f5")),
-                ToRgbHex(_zone2ColorPicker?.Color ?? Color.Parse("#ff5733")),
-                ToRgbHex(_zone3ColorPicker?.Color ?? Color.Parse("#33ff57")),
-                ToRgbHex(_zone4ColorPicker?.Color ?? Color.Parse("#ffff01")),
+                ToRgbHex(_zone1ColorPicker?.Color ?? Color.Parse(DefaultZone1Color)),
+                ToRgbHex(_zone2ColorPicker?.Color ?? Color.Parse(DefaultZone2Color)),
+                ToRgbHex(_zone3ColorPicker?.Color ?? Color.Parse(DefaultZone3Color)),
+                ToRgbHex(_zone4ColorPicker?.Color ?? Color.Parse(DefaultZone4Color)),
                 _keyboardBrightness
             );
 
@@ -834,11 +881,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private void LightingSpeedSlider_ValueChanged(object sender, AvaloniaPropertyChangedEventArgs e)
     {
         if (e.Property == Slider.ValueProperty)
-        {
-            _lightingSpeed = Convert.ToInt32(e.NewValue);
-            if (_lightSpeedTextBlock != null)
-                _lightSpeedTextBlock.Text = _lightingSpeed.ToString();
-        }
+            SetLightingSpeed(Convert.ToInt32(e.NewValue), false);
     }
 
     private async void LightingEffectsApplyButton_Click(object sender, RoutedEventArgs e)
@@ -847,14 +890,10 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         {
             var mode = _lightingModeComboBox?.SelectedIndex ?? 0;
 
-            // Driver uses 1 = left-to-right, 2 = right-to-left.
             var direction = GetSelectedDirection();
 
-            var color = _lightEffectColorPicker?.Color ?? Color.Parse(_effectColor);
+            var color = _lightEffectColorPicker?.Color ?? Color.Parse(DefaultEffectColor);
 
-            // Static Mode should behave like "same color in all four zones".
-            // If we call four_zone_mode for static mode, the driver/hardware can reuse
-            // the existing per-zone colors, which is exactly the bug you are seeing.
             if (mode == 0)
             {
                 var rgb = ToRgbHex(color);
@@ -917,6 +956,26 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             };
             await _client.SetUsbChargingAsync(level);
         }
+    }
+
+    private void SetKeyboardBrightness(int brightness, bool updateSlider = true)
+    {
+        _keyboardBrightness = brightness;
+
+        if (updateSlider && _keyBrightnessSlider != null)
+            _keyBrightnessSlider.Value = brightness;
+
+        SetText(_keyBrightnessText, $"{brightness}%");
+    }
+
+    private void SetLightingSpeed(int speed, bool updateSlider = true)
+    {
+        _lightingSpeed = speed;
+
+        if (updateSlider && _lightingSpeedSlider != null)
+            _lightingSpeedSlider.Value = speed;
+
+        SetText(_lightSpeedTextBlock, speed.ToString());
     }
 
     private static string ToRgbHex(Color color)
@@ -1008,7 +1067,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         mode = 0;
         speed = 5;
         brightness = 100;
-        direction = 2;
+        direction = DirectionRightToLeft;
         red = 0;
         green = 0;
         blue = 0;
@@ -1028,7 +1087,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                int.TryParse(parts[2], out brightness) &&
                brightness is >= 0 and <= 100 &&
                int.TryParse(parts[3], out direction) &&
-               direction is >= 1 and <= 2 &&
+               direction is >= DirectionLeftToRight and <= DirectionRightToLeft &&
                int.TryParse(parts[4], out red) &&
                red is >= 0 and <= 255 &&
                int.TryParse(parts[5], out green) &&
@@ -1083,24 +1142,22 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     {
         try
         {
-            var zone1 = ToRgbHex(_zone1ColorPicker?.Color ?? Color.Parse("#4287f5"));
-            var zone2 = ToRgbHex(_zone2ColorPicker?.Color ?? Color.Parse("#ff5733"));
-            var zone3 = ToRgbHex(_zone3ColorPicker?.Color ?? Color.Parse("#33ff57"));
-            var zone4 = ToRgbHex(_zone4ColorPicker?.Color ?? Color.Parse("#ffff01"));
-
-            var directory = Path.GetDirectoryName(KeyboardZonePresetPath);
-            if (!string.IsNullOrWhiteSpace(directory))
-                Directory.CreateDirectory(directory);
-
-            File.WriteAllText(
-                KeyboardZonePresetPath,
-                $"{zone1},{zone2},{zone3},{zone4},{_keyboardBrightness}"
-            );
+            WritePresetFile(KeyboardZonePresetPath, CreateZonePresetValueFromUI());
         }
         catch
         {
             // Failing to save a UI preset should not break keyboard control.
         }
+    }
+
+    private string CreateZonePresetValueFromUI()
+    {
+        var zone1 = ToRgbHex(_zone1ColorPicker?.Color ?? Color.Parse(DefaultZone1Color));
+        var zone2 = ToRgbHex(_zone2ColorPicker?.Color ?? Color.Parse(DefaultZone2Color));
+        var zone3 = ToRgbHex(_zone3ColorPicker?.Color ?? Color.Parse(DefaultZone3Color));
+        var zone4 = ToRgbHex(_zone4ColorPicker?.Color ?? Color.Parse(DefaultZone4Color));
+
+        return $"{zone1},{zone2},{zone3},{zone4},{_keyboardBrightness}";
     }
 
     private void ApplySavedLightingEffectPresetToUI()
@@ -1126,22 +1183,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             if (_lightingModeComboBox != null)
                 _lightingModeComboBox.SelectedIndex = mode;
 
-            _lightingSpeed = speed;
-
-            if (_lightingSpeedSlider != null)
-                _lightingSpeedSlider.Value = speed;
-
-            if (_lightSpeedTextBlock != null)
-                _lightSpeedTextBlock.Text = speed.ToString();
-
-            _keyboardBrightness = brightness;
-
-            if (_keyBrightnessSlider != null)
-                _keyBrightnessSlider.Value = brightness;
-
-            if (_keyBrightnessText != null)
-                _keyBrightnessText.Text = $"{brightness}%";
-
+            SetLightingSpeed(speed);
+            SetKeyboardBrightness(brightness);
             SetDirectionRadioButtons(direction);
 
             SetColorPicker(_lightEffectColorPicker, $"{red:X2}{green:X2}{blue:X2}");
@@ -1156,11 +1199,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     {
         try
         {
-            var directory = Path.GetDirectoryName(KeyboardLightingEffectPresetPath);
-            if (!string.IsNullOrWhiteSpace(directory))
-                Directory.CreateDirectory(directory);
-
-            File.WriteAllText(
+            WritePresetFile(
                 KeyboardLightingEffectPresetPath,
                 $"{mode},{_lightingSpeed},{_keyboardBrightness},{direction},{color.R},{color.G},{color.B}"
             );
@@ -1171,24 +1210,30 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
     }
 
+    private static void WritePresetFile(string path, string value)
+    {
+        Directory.CreateDirectory(AppDataFolderPath);
+        File.WriteAllText(path, value);
+    }
+
     private int GetSelectedDirection()
     {
         if (_leftToRightRadioButton?.IsChecked == true)
-            return 1;
+            return DirectionLeftToRight;
 
         if (_rightToLeftRadioButton?.IsChecked == true)
-            return 2;
+            return DirectionRightToLeft;
 
-        return 1;
+        return DirectionLeftToRight;
     }
 
     private void SetDirectionRadioButtons(int direction)
     {
         if (_leftToRightRadioButton != null)
-            _leftToRightRadioButton.IsChecked = direction == 1;
+            _leftToRightRadioButton.IsChecked = direction == DirectionLeftToRight;
 
         if (_rightToLeftRadioButton != null)
-            _rightToLeftRadioButton.IsChecked = direction == 2;
+            _rightToLeftRadioButton.IsChecked = direction == DirectionRightToLeft;
     }
 
     public static class AppState
