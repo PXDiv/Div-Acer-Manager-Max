@@ -16,6 +16,20 @@ namespace DivAcerManagerMax;
 
 public partial class MainWindow : Window, INotifyPropertyChanged
 {
+    private static readonly string KeyboardZonePresetPath =
+        Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+            "DivAcerManagerMax",
+            "keyboard-zone-colors.conf"
+        );
+
+    private static readonly string KeyboardLightingEffectPresetPath =
+        Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+            "DivAcerManagerMax",
+            "keyboard-lighting-effect.conf"
+        );
+
     private readonly string _effectColor = "#0078D7";
     private readonly string ProjectVersion = "1.0.0";
 
@@ -61,6 +75,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private PowerSourceDetection _powerDetection;
     private ToggleSwitch _powerToggleSwitch;
     private RadioButton _quietProfileButton;
+    private RadioButton _rightToLeftRadioButton;
     private Button _setManualSpeedButton;
     public DAMXSettings _settings;
     private Button _startCalibrationButton;
@@ -146,6 +161,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         _lightSpeedTextBlock = nameScope.Find<TextBlock>("LightSpeedTextBlock");
         _lightEffectColorPicker = nameScope.Find<ColorPicker>("LightEffectColorPicker");
         _leftToRightRadioButton = nameScope.Find<RadioButton>("LeftToRightRadioButton");
+        _rightToLeftRadioButton = nameScope.Find<RadioButton>("RightToLeftRadioButton");
         _lightingEffectsApplyButton = nameScope.Find<Button>("LightingEffectsApplyButton");
 
         // System settings controls
@@ -481,9 +497,6 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
         ApplyKeyboardSettings();
 
-        if (_lightEffectColorPicker != null)
-            _lightEffectColorPicker.Color = Color.Parse(_effectColor);
-
         if (_keyBrightnessText != null)
             _keyBrightnessText.Text = $"{_keyboardBrightness}%";
 
@@ -537,11 +550,82 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private void ApplyKeyboardSettings()
     {
-        if (_settings.HasFourZoneKb)
-        {
-            // TODO: Parse and apply the keyboard lighting settings from
-            // _settings.PerZoneMode and _settings.FourZoneMode
-        }
+        if (!_settings.HasFourZoneKb)
+            return;
+
+        ApplySavedZonePresetToUI();
+
+        if (!HasSavedZonePreset())
+            ApplyPerZoneSettingsToUI();
+
+        ApplyFourZoneSettingsToUI();
+        ApplySavedLightingEffectPresetToUI();
+    }
+
+    private void ApplyPerZoneSettingsToUI()
+    {
+        if (!TryParsePerZoneMode(
+                _settings.PerZoneMode,
+                out var zone1,
+                out var zone2,
+                out var zone3,
+                out var zone4,
+                out var brightness))
+            return;
+
+        SetColorPicker(_zone1ColorPicker, zone1);
+        SetColorPicker(_zone2ColorPicker, zone2);
+        SetColorPicker(_zone3ColorPicker, zone3);
+        SetColorPicker(_zone4ColorPicker, zone4);
+
+        _keyboardBrightness = brightness;
+
+        if (_keyBrightnessSlider != null)
+            _keyBrightnessSlider.Value = brightness;
+
+        if (_keyBrightnessText != null)
+            _keyBrightnessText.Text = $"{brightness}%";
+    }
+
+    private void ApplyFourZoneSettingsToUI()
+    {
+        if (!TryParseFourZoneMode(
+                _settings.FourZoneMode,
+                out var mode,
+                out var speed,
+                out var brightness,
+                out var direction,
+                out var red,
+                out var green,
+                out var blue))
+            return;
+
+        if (_lightingModeComboBox != null)
+            _lightingModeComboBox.SelectedIndex = mode;
+
+        _lightingSpeed = speed;
+
+        if (_lightingSpeedSlider != null)
+            _lightingSpeedSlider.Value = speed;
+
+        if (_lightSpeedTextBlock != null)
+            _lightSpeedTextBlock.Text = speed.ToString();
+
+        _keyboardBrightness = brightness;
+
+        if (_keyBrightnessSlider != null)
+            _keyBrightnessSlider.Value = brightness;
+
+        if (_keyBrightnessText != null)
+            _keyBrightnessText.Text = $"{brightness}%";
+
+        // Driver uses 1 = left-to-right, 2 = right-to-left.
+        // Your UI only needs to set the left-to-right radio; the other one follows through GroupName.
+        SetDirectionRadioButtons(direction);
+
+        // Mode 2 / Neon often reports 0,0,0. Do not overwrite the color picker with black for that.
+        if (mode != 2 || red != 0 || green != 0 || blue != 0)
+            SetColorPicker(_lightEffectColorPicker, $"{red:X2}{green:X2}{blue:X2}");
     }
 
     private async Task ShowMessageBox(string title, string message)
@@ -734,13 +818,17 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private async void ApplyKeyboardColorsButton_Click(object sender, RoutedEventArgs e)
     {
         if (_isConnected && _settings.HasFourZoneKb)
+        {
             await _client.SetPerZoneModeAsync(
-                _zone1ColorPicker?.Color.ToString().Substring(3) ?? "#4287f5",
-                _zone2ColorPicker?.Color.ToString().Substring(3) ?? "#ff5733",
-                _zone3ColorPicker?.Color.ToString().Substring(3) ?? "#33ff57",
-                _zone4ColorPicker?.Color.ToString().Substring(3) ?? "#FFFF01",
+                ToRgbHex(_zone1ColorPicker?.Color ?? Color.Parse("#4287f5")),
+                ToRgbHex(_zone2ColorPicker?.Color ?? Color.Parse("#ff5733")),
+                ToRgbHex(_zone3ColorPicker?.Color ?? Color.Parse("#33ff57")),
+                ToRgbHex(_zone4ColorPicker?.Color ?? Color.Parse("#ffff01")),
                 _keyboardBrightness
             );
+
+            SaveZonePresetFromUI();
+        }
     }
 
     private void LightingSpeedSlider_ValueChanged(object sender, AvaloniaPropertyChangedEventArgs e)
@@ -758,8 +846,31 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         if ((_isConnected && _settings.HasFourZoneKb) || AppState.DevMode)
         {
             var mode = _lightingModeComboBox?.SelectedIndex ?? 0;
-            var direction = _leftToRightRadioButton?.IsChecked == true ? 1 : 2;
+
+            // Driver uses 1 = left-to-right, 2 = right-to-left.
+            var direction = GetSelectedDirection();
+
             var color = _lightEffectColorPicker?.Color ?? Color.Parse(_effectColor);
+
+            // Static Mode should behave like "same color in all four zones".
+            // If we call four_zone_mode for static mode, the driver/hardware can reuse
+            // the existing per-zone colors, which is exactly the bug you are seeing.
+            if (mode == 0)
+            {
+                var rgb = ToRgbHex(color);
+
+                await _client.SetPerZoneModeAsync(
+                    rgb,
+                    rgb,
+                    rgb,
+                    rgb,
+                    _keyboardBrightness
+                );
+
+                SaveLightingEffectPresetFromUI(mode, direction, color);
+
+                return;
+            }
 
             await _client.SetFourZoneModeAsync(
                 mode,
@@ -770,6 +881,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 color.G,
                 color.B
             );
+
+            SaveLightingEffectPresetFromUI(mode, direction, color);
         }
     }
 
@@ -804,6 +917,278 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             };
             await _client.SetUsbChargingAsync(level);
         }
+    }
+
+    private static string ToRgbHex(Color color)
+    {
+        return $"{color.R:X2}{color.G:X2}{color.B:X2}";
+    }
+
+    private static void SetColorPicker(ColorPicker? picker, string rgbHex)
+    {
+        if (picker == null)
+            return;
+
+        var normalized = NormalizeRgbHex(rgbHex);
+        if (normalized == null)
+            return;
+
+        picker.Color = Color.Parse($"#{normalized}");
+    }
+
+    private static string? NormalizeRgbHex(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return null;
+
+        var hex = value.Trim();
+
+        if (hex.StartsWith('#'))
+            hex = hex[1..];
+
+        if (hex.Length != 6)
+            return null;
+
+        foreach (var c in hex)
+            if (!Uri.IsHexDigit(c))
+                return null;
+
+        return hex.ToUpperInvariant();
+    }
+
+    private static bool TryParsePerZoneMode(
+        string? value,
+        out string zone1,
+        out string zone2,
+        out string zone3,
+        out string zone4,
+        out int brightness)
+    {
+        zone1 = "";
+        zone2 = "";
+        zone3 = "";
+        zone4 = "";
+        brightness = 100;
+
+        if (string.IsNullOrWhiteSpace(value))
+            return false;
+
+        var parts = value.Trim().Split(',', StringSplitOptions.TrimEntries);
+
+        if (parts.Length != 5)
+            return false;
+
+        zone1 = NormalizeRgbHex(parts[0]) ?? "";
+        zone2 = NormalizeRgbHex(parts[1]) ?? "";
+        zone3 = NormalizeRgbHex(parts[2]) ?? "";
+        zone4 = NormalizeRgbHex(parts[3]) ?? "";
+
+        if (zone1.Length != 6 ||
+            zone2.Length != 6 ||
+            zone3.Length != 6 ||
+            zone4.Length != 6)
+            return false;
+
+        if (!int.TryParse(parts[4], out brightness))
+            return false;
+
+        return brightness is >= 0 and <= 100;
+    }
+
+    private static bool TryParseFourZoneMode(
+        string? value,
+        out int mode,
+        out int speed,
+        out int brightness,
+        out int direction,
+        out int red,
+        out int green,
+        out int blue)
+    {
+        mode = 0;
+        speed = 5;
+        brightness = 100;
+        direction = 2;
+        red = 0;
+        green = 0;
+        blue = 0;
+
+        if (string.IsNullOrWhiteSpace(value))
+            return false;
+
+        var parts = value.Trim().Split(',', StringSplitOptions.TrimEntries);
+
+        if (parts.Length != 7)
+            return false;
+
+        return int.TryParse(parts[0], out mode) &&
+               mode is >= 0 and <= 7 &&
+               int.TryParse(parts[1], out speed) &&
+               speed is >= 0 and <= 9 &&
+               int.TryParse(parts[2], out brightness) &&
+               brightness is >= 0 and <= 100 &&
+               int.TryParse(parts[3], out direction) &&
+               direction is >= 1 and <= 2 &&
+               int.TryParse(parts[4], out red) &&
+               red is >= 0 and <= 255 &&
+               int.TryParse(parts[5], out green) &&
+               green is >= 0 and <= 255 &&
+               int.TryParse(parts[6], out blue) &&
+               blue is >= 0 and <= 255;
+    }
+
+    private static bool HasSavedZonePreset()
+    {
+        return File.Exists(KeyboardZonePresetPath);
+    }
+
+    private void ApplySavedZonePresetToUI()
+    {
+        if (!File.Exists(KeyboardZonePresetPath))
+            return;
+
+        try
+        {
+            var value = File.ReadAllText(KeyboardZonePresetPath).Trim();
+
+            if (!TryParsePerZoneMode(
+                    value,
+                    out var zone1,
+                    out var zone2,
+                    out var zone3,
+                    out var zone4,
+                    out var brightness))
+                return;
+
+            SetColorPicker(_zone1ColorPicker, zone1);
+            SetColorPicker(_zone2ColorPicker, zone2);
+            SetColorPicker(_zone3ColorPicker, zone3);
+            SetColorPicker(_zone4ColorPicker, zone4);
+
+            _keyboardBrightness = brightness;
+
+            if (_keyBrightnessSlider != null)
+                _keyBrightnessSlider.Value = brightness;
+
+            if (_keyBrightnessText != null)
+                _keyBrightnessText.Text = $"{brightness}%";
+        }
+        catch
+        {
+            // Ignore broken preset file and let daemon settings win.
+        }
+    }
+
+    private void SaveZonePresetFromUI()
+    {
+        try
+        {
+            var zone1 = ToRgbHex(_zone1ColorPicker?.Color ?? Color.Parse("#4287f5"));
+            var zone2 = ToRgbHex(_zone2ColorPicker?.Color ?? Color.Parse("#ff5733"));
+            var zone3 = ToRgbHex(_zone3ColorPicker?.Color ?? Color.Parse("#33ff57"));
+            var zone4 = ToRgbHex(_zone4ColorPicker?.Color ?? Color.Parse("#ffff01"));
+
+            var directory = Path.GetDirectoryName(KeyboardZonePresetPath);
+            if (!string.IsNullOrWhiteSpace(directory))
+                Directory.CreateDirectory(directory);
+
+            File.WriteAllText(
+                KeyboardZonePresetPath,
+                $"{zone1},{zone2},{zone3},{zone4},{_keyboardBrightness}"
+            );
+        }
+        catch
+        {
+            // Failing to save a UI preset should not break keyboard control.
+        }
+    }
+
+    private void ApplySavedLightingEffectPresetToUI()
+    {
+        if (!File.Exists(KeyboardLightingEffectPresetPath))
+            return;
+
+        try
+        {
+            var value = File.ReadAllText(KeyboardLightingEffectPresetPath).Trim();
+
+            if (!TryParseFourZoneMode(
+                    value,
+                    out var mode,
+                    out var speed,
+                    out var brightness,
+                    out var direction,
+                    out var red,
+                    out var green,
+                    out var blue))
+                return;
+
+            if (_lightingModeComboBox != null)
+                _lightingModeComboBox.SelectedIndex = mode;
+
+            _lightingSpeed = speed;
+
+            if (_lightingSpeedSlider != null)
+                _lightingSpeedSlider.Value = speed;
+
+            if (_lightSpeedTextBlock != null)
+                _lightSpeedTextBlock.Text = speed.ToString();
+
+            _keyboardBrightness = brightness;
+
+            if (_keyBrightnessSlider != null)
+                _keyBrightnessSlider.Value = brightness;
+
+            if (_keyBrightnessText != null)
+                _keyBrightnessText.Text = $"{brightness}%";
+
+            SetDirectionRadioButtons(direction);
+
+            SetColorPicker(_lightEffectColorPicker, $"{red:X2}{green:X2}{blue:X2}");
+        }
+        catch
+        {
+            // Ignore broken preset file and let daemon settings win.
+        }
+    }
+
+    private void SaveLightingEffectPresetFromUI(int mode, int direction, Color color)
+    {
+        try
+        {
+            var directory = Path.GetDirectoryName(KeyboardLightingEffectPresetPath);
+            if (!string.IsNullOrWhiteSpace(directory))
+                Directory.CreateDirectory(directory);
+
+            File.WriteAllText(
+                KeyboardLightingEffectPresetPath,
+                $"{mode},{_lightingSpeed},{_keyboardBrightness},{direction},{color.R},{color.G},{color.B}"
+            );
+        }
+        catch
+        {
+            // Failing to save a UI preset should not break keyboard control.
+        }
+    }
+
+    private int GetSelectedDirection()
+    {
+        if (_leftToRightRadioButton?.IsChecked == true)
+            return 1;
+
+        if (_rightToLeftRadioButton?.IsChecked == true)
+            return 2;
+
+        return 1;
+    }
+
+    private void SetDirectionRadioButtons(int direction)
+    {
+        if (_leftToRightRadioButton != null)
+            _leftToRightRadioButton.IsChecked = direction == 1;
+
+        if (_rightToLeftRadioButton != null)
+            _rightToLeftRadioButton.IsChecked = direction == 2;
     }
 
     public static class AppState
