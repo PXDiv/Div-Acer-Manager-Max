@@ -744,11 +744,6 @@ class FanCurveDaemon:
                 
                 last_poll_time = now
 
-                if self.check_damx_override(fan_speed_path):
-                    self.we_are_controlling = False
-                    time.sleep(POLL_INTERVAL)
-                    continue
-
                 cpu_temp_raw, gpu_temp_raw = read_temps(hwmon_path)
 
                 # Smooth temps to filter turbo boost spikes
@@ -767,6 +762,24 @@ class FanCurveDaemon:
 
                 # ─── State machine: dynamic EPP scaling ─────────────
                 self.update_epp_state(gpu_watts)
+
+                if self.check_damx_override(fan_speed_path):
+                    self.we_are_controlling = False
+                    # Record telemetry even when overridden
+                    cpu_rpm, gpu_rpm = read_fan_rpms(hwmon_path)
+                    pl1_w = self.current_pl1 // 1000000
+                    try:
+                        with open(fan_speed_path, 'r') as f:
+                            parts = f.read().strip().split(',')
+                            cur_cpu = int(parts[0])
+                            cur_gpu = int(parts[1])
+                    except Exception:
+                        cur_cpu, cur_gpu = 0, 0
+                    telemetry.record(cpu_temp, gpu_temp, cur_cpu, cur_gpu,
+                                     cpu_rpm, gpu_rpm, self.mode.value, self.power_state.value,
+                                     gpu_watts, pl1_w, self.current_epp)
+                    time.sleep(POLL_INTERVAL)
+                    continue
 
                 # ─── Compute fan speeds based on current mode ────────────
                 if self.power_state == PowerState.BATTERY:
