@@ -90,6 +90,12 @@ RAPL_PL2_HEADROOM = 15000000   # PL2 = PL1 + 15W burst headroom
 RAPL_PL1_PATH = "/sys/class/powercap/intel-rapl:0/constraint_0_power_limit_uw"
 RAPL_PL2_PATH = "/sys/class/powercap/intel-rapl:0/constraint_1_power_limit_uw"
 
+# ─── Battery (DC) Mode Settings ──────────────────────────────────────────────
+BATTERY_PL1 = 35000000   # 35W — sustained power limit on battery
+BATTERY_PL2 = 45000000   # 45W — burst power limit on battery
+BATTERY_EPP_P = "power"  # EPP preference for P-cores on battery
+BATTERY_EPP_E = "power"  # EPP preference for E-cores on battery
+
 # ─── Paths ───────────────────────────────────────────────────────────────────
 HWMON_BASE = "/sys/devices/platform/acer-wmi/hwmon"
 PREDATOR_FAN_SPEED = "/sys/module/linuwu_sense/drivers/platform:acer-wmi/acer-wmi/predator_sense/fan_speed"
@@ -122,6 +128,7 @@ class FanMode(Enum):
 class PowerState(Enum):
     UNCAPPED = "uncapped"   # Full turbo (115W)
     ADAPTIVE = "adaptive"   # PI controller actively adjusting PL1
+    BATTERY  = "battery"    # Battery power caps (35W)
 
 
 # ─── Helper Functions ────────────────────────────────────────────────────────
@@ -153,6 +160,18 @@ def read_gpu_power():
     except (subprocess.TimeoutExpired, ValueError, FileNotFoundError):
         pass
     return 0.0
+
+
+def is_ac_connected():
+    """Check if AC adapter is connected. Returns True if AC is online, False if running on battery."""
+    path = "/sys/class/power_supply/ACAD/online"
+    if os.path.exists(path):
+        try:
+            with open(path, 'r') as f:
+                return f.read().strip() == "1"
+        except IOError:
+            pass
+    return True  # default to AC if check fails
 
 
 class TelemetryLogger:
@@ -444,63 +463,86 @@ class FanCurveDaemon:
             log.info(f"Mode transition: {old_mode.value} → {self.mode.value} (max_temp={max_temp}°C)")
 
     def update_power_state(self, max_temp, gpu_watts):
-        """Adaptive RAPL governor with Asymmetrical P-controller.
+        """Adaptive RAPL governor with Asymmetrical P-controller + Battery management.
 
-        UNCAPPED ──hot (1 cycle ≥88°C)──▶ ADAPTIVE (targets 84°C)
-            ▲                                   │
-            └────── cool 15s <78°C ─────────────┘
+        AC Connected:
+            UNCAPPED ──hot (1 cycle ≥88°C)──▶ ADAPTIVE (targets 84°C)
+                ▲                                   │
+                └────── cool 15s <78°C ─────────────┘
 
-        In ADAPTIVE mode, PL1 is nudged directly each cycle based on temp error.
-        - Above 84°C: drops PL1 rapidly (-5W per °C error)
-        - Below 84°C: recovers PL1 slowly (+1W per °C error)
+        Battery Connected:
+            Locks power state to BATTERY mode with low PL1/PL2 limits to conserve battery
+            and prevent voltage sag.
         """
         old_state = self.power_state
         now = time.time()
+        ac_online = is_ac_connected()
 
-        if self.power_state == PowerState.UNCAPPED:
-            if max_temp >= RAPL_CAP_ENTER:
-                if self.cap_dwell_start is None:
-                    self.cap_dwell_start = now
-                elif (now - self.cap_dwell_start) >= RAPL_CAP_DWELL:
-                    # Engage adaptive mode immediately, start at 65W
-                    self.power_state = PowerState.ADAPTIVE
-                    self.current_pl1 = 65000000
-                    self._write_rapl(self.current_pl1, self.current_pl1 + RAPL_PL2_HEADROOM)
-                    self.cap_dwell_start = None
-                    self.release_dwell_start = None
-            else:
+        if not ac_online:
+            # Force Battery Mode immediately if unplugged
+            if self.power_state != PowerState.BATTERY:
+                self.power_state = PowerState.BATTERY
+                self.current_pl1 = BATTERY_PL1
+                self._write_rapl(BATTERY_PL1, BATTERY_PL2)
+                self._write_epp_battery()
                 self.cap_dwell_start = None
-
-        elif self.power_state == PowerState.ADAPTIVE:
-            # Proportional step: adjust PL1 relative to CURRENT limit based on error from 84°C
-            error = max_temp - RAPL_TARGET_TEMP  # positive = too hot
-
-            if error > 0:
-                # Hot: drop limit rapidly (5W per °C above target)
-                adjustment = -int(error * RAPL_DOWN_GAIN)
-            else:
-                # Cool: recover limit slowly (1W per °C below target)
-                adjustment = -int(error * RAPL_UP_GAIN)
-
-            target_pl1 = self.current_pl1 + adjustment
-            new_pl1 = max(RAPL_PL1_MIN, min(RAPL_PL1_MAX, target_pl1))
-
-            if new_pl1 != self.current_pl1:
-                self.current_pl1 = new_pl1
-                self._write_rapl(new_pl1, min(new_pl1 + RAPL_PL2_HEADROOM, RAPL_PL2_UNCAPPED))
-
-            # Check if we can release back to uncapped
-            if max_temp < RAPL_CAP_EXIT:
-                if self.release_dwell_start is None:
-                    self.release_dwell_start = now
-                elif (now - self.release_dwell_start) >= RAPL_CAP_RELEASE:
-                    self.power_state = PowerState.UNCAPPED
-                    self.current_pl1 = RAPL_PL1_UNCAPPED
-                    self._write_rapl(RAPL_PL1_UNCAPPED, RAPL_PL2_UNCAPPED)
-                    self.cap_dwell_start = None
-                    self.release_dwell_start = None
-            else:
                 self.release_dwell_start = None
+        else:
+            # AC online: restore full power if transitioning back from Battery Mode
+            if self.power_state == PowerState.BATTERY:
+                log.info("🔌 AC plugged in, restoring full power limits")
+                self.power_state = PowerState.UNCAPPED
+                self.current_pl1 = RAPL_PL1_UNCAPPED
+                self._write_rapl(RAPL_PL1_UNCAPPED, RAPL_PL2_UNCAPPED)
+                self._write_epp_asymmetric(is_idle=False)
+                self.cap_dwell_start = None
+                self.release_dwell_start = None
+
+            # Normal AC power state machine
+            if self.power_state == PowerState.UNCAPPED:
+                if max_temp >= RAPL_CAP_ENTER:
+                    if self.cap_dwell_start is None:
+                        self.cap_dwell_start = now
+                    elif (now - self.cap_dwell_start) >= RAPL_CAP_DWELL:
+                        # Engage adaptive mode immediately, start at 65W
+                        self.power_state = PowerState.ADAPTIVE
+                        self.current_pl1 = 65000000
+                        self._write_rapl(self.current_pl1, self.current_pl1 + RAPL_PL2_HEADROOM)
+                        self.cap_dwell_start = None
+                        self.release_dwell_start = None
+                else:
+                    self.cap_dwell_start = None
+
+            elif self.power_state == PowerState.ADAPTIVE:
+                # Proportional step: adjust PL1 relative to CURRENT limit based on error from 84°C
+                error = max_temp - RAPL_TARGET_TEMP  # positive = too hot
+
+                if error > 0:
+                    # Hot: drop limit rapidly (5W per °C above target)
+                    adjustment = -int(error * RAPL_DOWN_GAIN)
+                else:
+                    # Cool: recover limit slowly (1W per °C below target)
+                    adjustment = -int(error * RAPL_UP_GAIN)
+
+                target_pl1 = self.current_pl1 + adjustment
+                new_pl1 = max(RAPL_PL1_MIN, min(RAPL_PL1_MAX, target_pl1))
+
+                if new_pl1 != self.current_pl1:
+                    self.current_pl1 = new_pl1
+                    self._write_rapl(new_pl1, min(new_pl1 + RAPL_PL2_HEADROOM, RAPL_PL2_UNCAPPED))
+
+                # Check if we can release back to uncapped
+                if max_temp < RAPL_CAP_EXIT:
+                    if self.release_dwell_start is None:
+                        self.release_dwell_start = now
+                    elif (now - self.release_dwell_start) >= RAPL_CAP_RELEASE:
+                        self.power_state = PowerState.UNCAPPED
+                        self.current_pl1 = RAPL_PL1_UNCAPPED
+                        self._write_rapl(RAPL_PL1_UNCAPPED, RAPL_PL2_UNCAPPED)
+                        self.cap_dwell_start = None
+                        self.release_dwell_start = None
+                else:
+                    self.release_dwell_start = None
 
         if self.power_state != old_state:
             pl1_w = self.current_pl1 // 1000000
@@ -526,6 +568,9 @@ class FanCurveDaemon:
           - E-cores (16-23) set to "balance_power" (takes background load).
           This naturally guides Linux scheduler to place idle background tasks onto E-cores first.
         """
+        if self.power_state == PowerState.BATTERY:
+            return  # Managed by battery power state EPP settings
+
         try:
             import psutil
             cpu_usage = psutil.cpu_percent()
@@ -584,6 +629,37 @@ class FanCurveDaemon:
             log.info(f"🌿 EPP Asymmetry: {state_str} -> P-cores={p_pref} ({p_count} threads), E-cores={e_pref} ({e_count} threads)")
         except Exception as e:
             log.error(f"Failed to set asymmetric EPP: {e}")
+
+    def _write_epp_battery(self):
+        """Write power-saving EPP to all cores to maximize battery life."""
+        try:
+            p_pref = BATTERY_EPP_P
+            e_pref = BATTERY_EPP_E
+            
+            p_count = 0
+            for i in range(16):
+                path = f"/sys/devices/system/cpu/cpu{i}/cpufreq/energy_performance_preference"
+                try:
+                    with open(path, 'w') as f:
+                        f.write(p_pref)
+                    p_count += 1
+                except IOError:
+                    pass
+            
+            e_count = 0
+            for i in range(16, 24):
+                path = f"/sys/devices/system/cpu/cpu{i}/cpufreq/energy_performance_preference"
+                try:
+                    with open(path, 'w') as f:
+                        f.write(e_pref)
+                    e_count += 1
+                except IOError:
+                    pass
+            
+            self.current_epp = "battery"
+            log.info(f"🔋 Battery EPP: P-cores={p_pref} ({p_count} threads), E-cores={e_pref} ({e_count} threads)")
+        except Exception as e:
+            log.error(f"Failed to set battery EPP: {e}")
 
     def compute_independent(self, cpu_temp, gpu_temp):
         """Independent mode: each fan follows its own component.
@@ -693,7 +769,14 @@ class FanCurveDaemon:
                 self.update_epp_state(gpu_watts)
 
                 # ─── Compute fan speeds based on current mode ────────────
-                if self.power_state != PowerState.UNCAPPED:
+                if self.power_state == PowerState.BATTERY:
+                    # On battery: if moderate (<75°C), release to EC auto (0,0) to save battery power.
+                    # If hot (≥75°C), run our independent fan curve to protect components.
+                    if max_temp < 75:
+                        target_cpu, target_gpu = 0, 0
+                    else:
+                        target_cpu, target_gpu = self.compute_independent(cpu_temp, gpu_temp)
+                elif self.power_state != PowerState.UNCAPPED:
                     # Power caps active — force fans to max to recover temps
                     target_cpu, target_gpu = 100, 100
                 elif self.mode == FanMode.COUPLED:
