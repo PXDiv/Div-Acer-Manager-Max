@@ -57,7 +57,7 @@ COUPLED_HOLD_SECONDS = 15  # minimum seconds to stay in coupled mode
 TEMP_SMOOTH_SAMPLES = 3
 
 # ─── Hysteresis (within each mode) ───────────────────────────────────────────
-HYSTERESIS_DOWN = 4           # °C — temp must drop this much before ramping down
+HYSTERESIS_DOWN = 5           # °C — temp must drop this much before ramping down
 MAX_RAMP_DOWN_PER_CYCLE = 10  # % — max speed reduction per poll cycle
 
 # ─── Adaptive RAPL Power Governor (Asymmetrical P-controller) ────────
@@ -77,13 +77,13 @@ RAPL_CAP_RELEASE = 15         # seconds cool before releasing
 
 # Adaptive controller tuning
 RAPL_TARGET_TEMP  = 84        # °C — temperature to converge on
-RAPL_DOWN_GAIN = 5000000      # 5W per °C error above target (fast cool-down)
+RAPL_DOWN_GAIN = 2000000      # 2W per °C error above target (gentler cool-down)
 RAPL_UP_GAIN   = 1000000      # 1W per °C error below target (cautious recovery)
 
 # Power limits (microwatts)
 RAPL_PL1_UNCAPPED = 115000000  # 115W — factory default
 RAPL_PL2_UNCAPPED = 157000000  # 157W — factory default
-RAPL_PL1_MIN      = 35000000   # 35W  — absolute floor
+RAPL_PL1_MIN      = 55000000   # 35W  — absolute floor
 RAPL_PL1_MAX      = 115000000  # 115W — ceiling (same as uncapped)
 RAPL_PL2_HEADROOM = 15000000   # PL2 = PL1 + 15W burst headroom
 
@@ -379,15 +379,16 @@ class FanCurveDaemon:
         self.mode = FanMode.INDEPENDENT
         self.coupled_enter_time = 0  # timestamp when we entered coupled
 
-        # Temperature smoothing ring buffers
-        self.cpu_temp_history = []
-        self.gpu_temp_history = []
+        # Temperature smoothing tracking variables (Exponential Moving Average)
+        self.cpu_temp_smooth = None
+        self.gpu_temp_smooth = None
 
         # Adaptive RAPL power governor (asymmetrical)
         self.power_state = PowerState.UNCAPPED
         self.cap_dwell_start = None      # when we started seeing temps above CAP_ENTER
         self.release_dwell_start = None  # when we started seeing temps below CAP_EXIT
         self.current_pl1 = RAPL_PL1_UNCAPPED  # current PL1 setting in microwatts
+        self.last_rapl_error = 0.0            # error history for velocity-form PI damping
 
         # Dynamic Energy Performance Preference governor
         self.idle_start_time = None
@@ -435,12 +436,12 @@ class FanCurveDaemon:
                     self.last_ramp_coupled = None
                 return False
 
-    def smooth_temp(self, history, new_temp):
-        """Rolling average temperature to filter turbo boost spikes."""
-        history.append(new_temp)
-        if len(history) > TEMP_SMOOTH_SAMPLES:
-            history.pop(0)
-        return sum(history) // len(history)
+    def smooth_temp(self, current_smooth, raw_temp, dt, tau=4.0):
+        """Exponential Moving Average filter with time-constant tau."""
+        if current_smooth is None or current_smooth == 0:
+            return float(raw_temp)
+        alpha = dt / (tau + dt)
+        return alpha * float(raw_temp) + (1.0 - alpha) * current_smooth
 
     def update_mode(self, max_temp):
         """State machine for mode transitions with hysteresis + hold timer."""
@@ -462,7 +463,7 @@ class FanCurveDaemon:
         if self.mode != old_mode:
             log.info(f"Mode transition: {old_mode.value} → {self.mode.value} (max_temp={max_temp}°C)")
 
-    def update_power_state(self, max_temp, gpu_watts):
+    def update_power_state(self, max_temp, gpu_watts, dt):
         """Adaptive RAPL governor with Asymmetrical P-controller + Battery management.
 
         AC Connected:
@@ -504,25 +505,46 @@ class FanCurveDaemon:
                     if self.cap_dwell_start is None:
                         self.cap_dwell_start = now
                     elif (now - self.cap_dwell_start) >= RAPL_CAP_DWELL:
-                        # Engage adaptive mode immediately, start at 65W
+                        # Engage adaptive mode immediately, start at 85W (gentler drop)
                         self.power_state = PowerState.ADAPTIVE
-                        self.current_pl1 = 65000000
+                        self.current_pl1 = 85000000
                         self._write_rapl(self.current_pl1, self.current_pl1 + RAPL_PL2_HEADROOM)
                         self.cap_dwell_start = None
                         self.release_dwell_start = None
+                        self.last_rapl_error = max_temp - RAPL_TARGET_TEMP  # Initialize PI error history
                 else:
                     self.cap_dwell_start = None
 
             elif self.power_state == PowerState.ADAPTIVE:
-                # Proportional step: adjust PL1 relative to CURRENT limit based on error from 84°C
+                # Velocity-form PI Controller with Derivative Damping (Brake)
+                # Adjusts power limit rate-of-change based on current error and error velocity.
+                # Form: delta_PL1 = - (Kp * error_velocity + Ki * error * dt)
                 error = max_temp - RAPL_TARGET_TEMP  # positive = too hot
+                error_diff = error - self.last_rapl_error
+                self.last_rapl_error = error
 
-                if error > 0:
-                    # Hot: drop limit rapidly (5W per °C above target)
-                    adjustment = -int(error * RAPL_DOWN_GAIN)
-                else:
-                    # Cool: recover limit slowly (1W per °C below target)
-                    adjustment = -int(error * RAPL_UP_GAIN)
+                # Proportional gain on error velocity (Kp = 3.5W per °C change)
+                # Acts as a major damping factor (brake) to counter fast temp climbs/falls
+                kp_term = error_diff * 3500000
+
+                # Integral gain on current error (Ki = 0.75W per °C-sec when hot, 0.5W when cool)
+                # Drives steady-state convergence, locking onto heatsink equilibrium capacity.
+                # Continuous time scaling ensures dynamic consistency across dynamic polling rates.
+                ki_gain = 750000 if error > 0 else 500000
+                ki_term = error * ki_gain * dt
+
+                raw_adj = -int(kp_term + ki_term)
+
+                # Slew-rate limiting: prevent sudden huge shifts in power limits per poll.
+                # Scaled continuously by dt to maintain consistent slope (e.g. 5W drop per sec).
+                max_drop = int(5000000 * dt)      # 5W drop per second
+                max_recover = int(2500000 * dt)   # 2.5W recovery per second
+                
+                # Minimum bounds to prevent clamping to 0 if dt is very small
+                max_drop = max(2000000, max_drop)
+                max_recover = max(1000000, max_recover)
+
+                adjustment = max(-max_drop, min(max_recover, raw_adj))
 
                 target_pl1 = self.current_pl1 + adjustment
                 new_pl1 = max(RAPL_PL1_MIN, min(RAPL_PL1_MAX, target_pl1))
@@ -724,13 +746,20 @@ class FanCurveDaemon:
         last_log_time = 0
         LOG_INTERVAL = 60
         last_poll_time = time.time()
+        # Initialize loop sleep to standard interval
+        current_sleep = POLL_INTERVAL
 
         while self.running:
             try:
                 now = time.time()
+                # Measure physical elapsed time between poll cycles
+                dt = now - last_poll_time
+                last_poll_time = now
+                dt = max(0.1, min(5.0, dt)) # Safety clamp
+
                 # Check for suspend/resume (time jump)
-                if now - last_poll_time > POLL_INTERVAL * 3:
-                    log.info(f"System resume detected (elapsed time: {now - last_poll_time:.1f}s). Re-initializing fans & power states.")
+                if dt > POLL_INTERVAL * 3:
+                    log.info(f"System resume detected (elapsed time: {dt:.1f}s). Re-initializing fans & power states.")
                     write_fan_speed(fan_speed_path, 0, 0)
                     self.we_are_controlling = False
                     self.damx_override = False
@@ -741,15 +770,18 @@ class FanCurveDaemon:
                     # Force re-write of RAPL limits and EPP preference
                     self._write_rapl(self.current_pl1, self.current_pl1 + RAPL_PL2_HEADROOM if self.power_state == PowerState.ADAPTIVE else RAPL_PL2_UNCAPPED)
                     self._write_epp_asymmetric(is_idle=(self.current_epp == "asymmetric_idle"))
-                
-                last_poll_time = now
 
                 cpu_temp_raw, gpu_temp_raw = read_temps(hwmon_path)
 
-                # Smooth temps to filter turbo boost spikes
-                cpu_temp = self.smooth_temp(self.cpu_temp_history, cpu_temp_raw)
-                gpu_temp = self.smooth_temp(self.gpu_temp_history, gpu_temp_raw)
+                # Smooth temps using time-constant EMA to filter turbo boost spikes
+                self.cpu_temp_smooth = self.smooth_temp(self.cpu_temp_smooth, cpu_temp_raw, dt, tau=4.0)
+                self.gpu_temp_smooth = self.smooth_temp(self.gpu_temp_smooth, gpu_temp_raw, dt, tau=4.0)
+                cpu_temp = int(self.cpu_temp_smooth)
+                gpu_temp = int(self.gpu_temp_smooth)
                 max_temp = max(cpu_temp, gpu_temp)
+
+                # Dynamic polling interval sleep time: 0.5s when hot to prevent TjMax PROCHOT, 2.0s when cool
+                current_sleep = 0.5 if max_temp >= 80 else 2.0
 
                 # Read GPU power draw for RAPL governor decisions
                 gpu_watts = read_gpu_power()
@@ -758,7 +790,7 @@ class FanCurveDaemon:
                 self.update_mode(max_temp)
 
                 # ─── State machine: dynamic RAPL governor ───────────
-                self.update_power_state(max_temp, gpu_watts)
+                self.update_power_state(max_temp, gpu_watts, dt)
 
                 # ─── State machine: dynamic EPP scaling ─────────────
                 self.update_epp_state(gpu_watts)
@@ -778,7 +810,7 @@ class FanCurveDaemon:
                     telemetry.record(cpu_temp, gpu_temp, cur_cpu, cur_gpu,
                                      cpu_rpm, gpu_rpm, self.mode.value, self.power_state.value,
                                      gpu_watts, pl1_w, self.current_epp)
-                    time.sleep(POLL_INTERVAL)
+                    time.sleep(current_sleep)
                     continue
 
                 # ─── Compute fan speeds based on current mode ────────────
@@ -805,12 +837,28 @@ class FanCurveDaemon:
                         self.cpu_speed = 0
                         self.gpu_speed = 0
                         self.we_are_controlling = False
-                    time.sleep(POLL_INTERVAL)
+                    time.sleep(current_sleep)
                     continue
 
                 if target_cpu != self.cpu_speed or target_gpu != self.gpu_speed:
                     mode_tag = "🔗" if self.mode == FanMode.COUPLED else "🔀"
-                    log.info(f"{mode_tag} CPU={cpu_temp}°C GPU={gpu_temp}°C → cpu_fan={target_cpu}% gpu_fan={target_gpu}%")
+                    # Log to INFO only for significant changes, otherwise log as DEBUG
+                    cpu_diff = abs(target_cpu - self.cpu_speed)
+                    gpu_diff = abs(target_gpu - self.gpu_speed)
+                    is_significant = (
+                        cpu_diff >= 5 or 
+                        gpu_diff >= 5 or 
+                        (target_cpu == 0 and self.cpu_speed > 0) or 
+                        (target_cpu > 0 and self.cpu_speed == 0) or
+                        (target_gpu == 0 and self.gpu_speed > 0) or 
+                        (target_gpu > 0 and self.gpu_speed == 0) or
+                        target_cpu == 100 or 
+                        target_gpu == 100
+                    )
+                    if is_significant:
+                        log.info(f"{mode_tag} CPU={cpu_temp}°C GPU={gpu_temp}°C → cpu_fan={target_cpu}% gpu_fan={target_gpu}%")
+                    else:
+                        log.debug(f"{mode_tag} CPU={cpu_temp}°C GPU={gpu_temp}°C → cpu_fan={target_cpu}% gpu_fan={target_gpu}%")
                     self.we_are_controlling = True
                     write_fan_speed(fan_speed_path, target_cpu, target_gpu)
                     self.cpu_speed = target_cpu
@@ -832,7 +880,7 @@ class FanCurveDaemon:
             except Exception as e:
                 log.error(f"Error in main loop: {e}")
 
-            time.sleep(POLL_INTERVAL)
+            time.sleep(current_sleep)
 
         # Clean shutdown — restore full power and release fans
         self._write_rapl(RAPL_PL1_UNCAPPED, RAPL_PL2_UNCAPPED)
