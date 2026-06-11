@@ -342,6 +342,39 @@ EOL
   return 0
 }
 
+configure_nitro_button() {
+  echo -e "${YELLOW}Configuring Nitro Button Hardware Code...${NC}"
+
+  if ! command -v evtest &> /dev/null; then
+    echo -e "${BLUE}Installing evtest for hardware detection...${NC}"
+    apt-get update && apt-get install -y evtest
+  fi
+
+  DEVICE=$(grep -A 5 -B 5 "AT Translated Set 2 keyboard" /proc/bus/input/devices | grep -m 1 "event" | sed 's/.*event\([0-9]\+\).*/\/dev\/input\/event\1/')
+  
+  mkdir -p /etc/damx
+
+  if [ -z "$DEVICE" ]; then
+    echo -e "${RED}Error: Keyboard hardware not found! Using default Nitro code (425).${NC}"
+    echo "NITRO_KEY=425" > /etc/damx/nitro.conf
+    return 1
+  fi
+
+  echo -e "${GREEN}Keyboard detected at: $DEVICE${NC}"
+  echo -e "${YELLOW}>>> PLEASE PRESS YOUR NITRO (N) BUTTON NOW (Waiting 30 seconds)... <<<${NC}"
+
+  # NitroButton code 
+  CAPTURED_CODE=$(timeout 30 evtest "$DEVICE" | grep -m 1 "type 1 (EV_KEY).*value 1" | sed -n 's/.*code \([0-9]*\).*/\1/p')
+
+  if [ -n "$CAPTURED_CODE" ]; then
+    echo -e "${GREEN}Success! Nitro button code captured: ${CAPTURED_CODE}${NC}"
+    echo "NITRO_KEY=$CAPTURED_CODE" > /etc/damx/nitro.conf
+  else
+    echo -e "${RED}Timeout or no key detected. Falling back to default code (425).${NC}"
+    echo "NITRO_KEY=425" > /etc/damx/nitro.conf
+  fi
+}
+
 perform_install() {
   local skip_drivers=$1
   local is_update=$2
@@ -374,6 +407,9 @@ perform_install() {
 
   install_gui
   GUI_RESULT=$?
+
+  #Setup NitroButton shortcut
+  configure_nitro_button
 
   # Check if all installations were successful
   if [ $DRIVER_RESULT -eq 0 ] && [ $DAEMON_RESULT -eq 0 ] && [ $GUI_RESULT -eq 0 ]; then
