@@ -167,6 +167,39 @@ comprehensive_cleanup() {
   return 0
 }
 
+# Detect if kernel was compiled with LLVM/Clang (e.g., CachyOS, some Arch variants)
+# Returns 0 (true) if LLVM kernel detected, 1 (false) otherwise
+is_llvm_kernel() {
+  # Check kernel build info
+  if grep -qi "clang\|llvm" /proc/version 2>/dev/null; then
+    return 0
+  fi
+  # Check for known LLVM-based distros
+  if [ -f /etc/os-release ]; then
+    if grep -qi "cachyos" /etc/os-release; then
+      return 0
+    fi
+  fi
+  return 1
+}
+
+# Install build dependencies based on distribution
+install_build_deps() {
+  if command -v pacman &> /dev/null; then
+    # Arch-based (including CachyOS, Manjaro, EndeavourOS)
+    pacman -S --needed --noconfirm base-devel
+    if is_llvm_kernel; then
+      pacman -S --needed --noconfirm clang llvm lld
+    fi
+  elif command -v apt-get &> /dev/null; then
+    apt-get update && apt-get install -y build-essential
+  elif command -v dnf &> /dev/null; then
+    dnf install -y gcc make kernel-devel
+  elif command -v zypper &> /dev/null; then
+    zypper install -y gcc make kernel-devel
+  fi
+}
+
 install_drivers() {
   echo -e "${YELLOW}Installing Linuwu-Sense drivers...${NC}"
 
@@ -179,16 +212,25 @@ install_drivers() {
 
   cd Linuwu-Sense
 
-  # Check if make is installed
+  # Install required build dependencies
   if ! command -v make &> /dev/null; then
     echo -e "${YELLOW}Installing build tools...${NC}"
-    apt-get update && apt-get install -y build-essential
+    install_build_deps
   fi
 
-  # Build and install drivers
-  make clean
-  make
-  make install
+  # Build driver with appropriate compiler flags
+  # LLVM-compiled kernels (CachyOS, etc.) require matching compiler
+  if is_llvm_kernel; then
+    echo -e "${YELLOW}Detected LLVM-compiled kernel, using Clang...${NC}"
+    install_build_deps  # Ensure clang is installed
+    make clean LLVM=1 CC=clang
+    make LLVM=1 CC=clang
+    make install LLVM=1 CC=clang
+  else
+    make clean
+    make
+    make install
+  fi
 
   if [ $? -eq 0 ]; then
     echo -e "${GREEN}Linuwu-Sense drivers installed successfully!${NC}"
