@@ -5,7 +5,7 @@
 # Components: Linuwu-Sense (drivers), DAMX-Daemon, and DAMX-GUI
 
 # Constants
-SCRIPT_VERSION="0.8.8"
+SCRIPT_VERSION="0.9.1"
 INSTALL_DIR="/opt/damx"
 BIN_DIR="/usr/local/bin"
 SYSTEMD_DIR="/etc/systemd/system"
@@ -202,6 +202,45 @@ install_drivers() {
   fi
 }
 
+install_drivers_with_secureboot() {
+  echo -e "${YELLOW}Installing Linuwu-Sense drivers with Secure Boot support...${NC}"
+
+  if [ ! -d "Linuwu-Sense" ]; then
+    echo -e "${RED}Error: Linuwu-Sense directory not found!${NC}"
+    echo "Please make sure the script is run from the same directory containing Linuwu-Sense folder."
+    pause
+    return 1
+  fi
+
+  cd Linuwu-Sense
+
+  # Check if the build_sign_install.sh script exists
+  if [ ! -f "build_sign_install.sh" ]; then
+    echo -e "${RED}Error: build_sign_install.sh not found in Linuwu-Sense directory!${NC}"
+    cd ..
+    pause
+    return 1
+  fi
+
+  # Make the script executable
+  chmod +x build_sign_install.sh
+
+  # Run the build_sign_install.sh script
+  echo -e "${BLUE}Running secure build and installation process...${NC}"
+  ./build_sign_install.sh
+
+  if [ $? -eq 0 ]; then
+    echo -e "${GREEN}Linuwu-Sense drivers built, signed, and installed successfully with Secure Boot support!${NC}"
+    cd ..
+    return 0
+  else
+    echo -e "${RED}Error: Failed to build and install Linuwu-Sense drivers with Secure Boot support${NC}"
+    cd ..
+    pause
+    return 1
+  fi
+}
+
 install_daemon() {
   echo -e "${YELLOW}Installing DAMX-Daemon...${NC}"
 
@@ -303,6 +342,7 @@ EOL
 perform_install() {
   local skip_drivers=$1
   local is_update=$2
+  local use_secureboot=$3
 
   # If this is an update/reinstall, perform cleanup first
   if [ "$is_update" = true ]; then
@@ -320,7 +360,11 @@ perform_install() {
 
   # Install components
   if [ "$skip_drivers" = false ]; then
-    install_drivers
+    if [ "$use_secureboot" = true ]; then
+      install_drivers_with_secureboot
+    else
+      install_drivers
+    fi
     DRIVER_RESULT=$?
   else
     echo -e "${YELLOW}Skipping driver installation as requested.${NC}"
@@ -393,37 +437,62 @@ main_menu() {
     echo -e "Please select an option:"
     echo -e "  ${GREEN}1${NC}) Install DAMX Suite (complete)"
     echo -e "  ${GREEN}2${NC}) Install DAMX Suite (without drivers)"
-    echo -e "  ${GREEN}3${NC}) Uninstall DAMX Suite"
-    echo -e "  ${GREEN}4${NC}) Reinstall/Update DAMX Suite (recommended for upgrades)"
-    echo -e "  ${GREEN}5${NC}) Check service status"
+    echo -e "  ${GREEN}3${NC}) Install DAMX Suite (complete with Secure Boot support)"
+    echo -e "  ${GREEN}4${NC}) Install drivers only (with Secure Boot support)"
+    echo -e "  ${GREEN}5${NC}) Uninstall DAMX Suite"
+    echo -e "  ${GREEN}6${NC}) Reinstall/Update DAMX Suite (recommended for upgrades)"
+    echo -e "  ${GREEN}7${NC}) Check service status"
     echo -e "  ${GREEN}q${NC}) Quit"
     echo ""
 
-    read -p "Enter your choice [1-5 or q]: " choice
+    read -p "Enter your choice [1-7 or q]: " choice
 
     case $choice in
       1)
         print_banner
         echo -e "${BLUE}Starting complete installation...${NC}"
-        perform_install false false
+        perform_install false false false
         ;;
       2)
         print_banner
         echo -e "${BLUE}Starting installation without drivers...${NC}"
-        perform_install true false
+        perform_install true false false
         ;;
       3)
+        print_banner
+        echo -e "${BLUE}Starting complete installation with Secure Boot support...${NC}"
+        echo -e "${YELLOW}This will build, sign, and install drivers with Secure Boot support along with daemon and GUI.${NC}"
+        echo -e "${YELLOW}Note: You may be prompted for your password during the process.${NC}"
+        perform_install false false true
+        ;;
+      4)
+        print_banner
+        echo -e "${BLUE}Starting driver installation with Secure Boot support...${NC}"
+        echo -e "${YELLOW}This will build, sign, and install drivers only.${NC}"
+        echo -e "${YELLOW}Note: You may be prompted for your password during the process.${NC}"
+        cleanup_legacy_installation
+        install_drivers_with_secureboot
+        ;;
+      5)
         print_banner
         echo -e "${BLUE}Starting uninstallation...${NC}"
         uninstall
         ;;
-      4)
+      6)
         print_banner
         echo -e "${BLUE}Starting reinstallation/update...${NC}"
         echo -e "${YELLOW}This will completely remove the existing installation before installing the new version.${NC}"
-        perform_install false true
+        echo ""
+        read -p "Do you want to install with Secure Boot support for drivers? (y/n): " secureboot_choice
+        if [[ "$secureboot_choice" =~ ^[Yy]$ ]]; then
+          echo -e "${BLUE}Secure Boot support will be used...${NC}"
+          perform_install false true true
+        else
+          echo -e "${BLUE}Regular driver installation will be used...${NC}"
+          perform_install false true false
+        fi
         ;;
-      5)
+      7)
         print_banner
         echo -e "${BLUE}Checking DAMX service status...${NC}"
         echo ""
