@@ -186,9 +186,9 @@ install_drivers() {
   fi
 
   # Build and install drivers
-  make clean
-  make
-  make install
+make clean
+make CC=clang LD=ld.lld
+sudo make CC=clang LD=ld.lld install
 
   if [ $? -eq 0 ]; then
     echo -e "${GREEN}Linuwu-Sense drivers installed successfully!${NC}"
