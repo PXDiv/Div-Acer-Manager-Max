@@ -121,27 +121,24 @@
                                                HorizontalAlignment="Right" />
                     </Grid>
 
-                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Spacing="20" Margin="10">
-                        <StackPanel HorizontalAlignment="Center">
-                            <TextBlock Text="CPU Fan:" Opacity="0.7" Width="90" VerticalAlignment="Center" />
-                            <TextBlock x:Name="CpuFanSpeed" Text="2400 RPM" FontWeight="SemiBold"
-                                       VerticalAlignment="Center" />
-                            <!-- CPU Fan Animation -->
-                            <material:MaterialIcon x:Name="CpuFanIcon" Classes="FanIcon" Kind="Fan" Width="64"
-                                                   Height="64"
-                                                   HorizontalAlignment="Center" VerticalAlignment="Center" />
-
-
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Spacing="40" Margin="10">
+                        
+                        <StackPanel HorizontalAlignment="Center" Spacing="5">
+                            <TextBlock Text="CPU Fan:" Opacity="0.7" HorizontalAlignment="Center" />
+                            <TextBlock x:Name="CpuFanSpeed" Text="2400 RPM" FontWeight="SemiBold" HorizontalAlignment="Center" />
+                            <material:MaterialIcon x:Name="CpuFanIcon" Classes="FanIcon" Kind="Fan" Width="64" Height="64"
+                                                   RenderTransformOrigin="50%,50%"
+                                                   HorizontalAlignment="Center" />
                         </StackPanel>
 
-                        <StackPanel>
-                            <TextBlock Text="GPU Fan:" Opacity="0.7" Width="90" VerticalAlignment="Center" />
-                            <TextBlock x:Name="GpuFanSpeed" Text="3100 RPM" FontWeight="SemiBold"
-                                       VerticalAlignment="Center" />
-                            <material:MaterialIcon x:Name="GpuFanIcon" Classes="FanIcon" Kind="Fan" Width="64"
-                                                   Height="64"
-                                                   HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        <StackPanel HorizontalAlignment="Center" Spacing="5">
+                            <TextBlock Text="GPU Fan:" Opacity="0.7" HorizontalAlignment="Center" />
+                            <TextBlock x:Name="GpuFanSpeed" Text="3100 RPM" FontWeight="SemiBold" HorizontalAlignment="Center" />
+                            <material:MaterialIcon x:Name="GpuFanIcon" Classes="FanIcon" Kind="Fan" Width="64" Height="64"
+                                                   RenderTransformOrigin="50%,50%"
+                                                   HorizontalAlignment="Center" />
                         </StackPanel>
+                        
                     </StackPanel>
 
                     <DockPanel LastChildFill="False" Margin="0,2" VerticalAlignment="Center" IsVisible="False">

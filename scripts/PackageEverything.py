@@ -17,19 +17,26 @@ from pathlib import Path
 
 class DAMXBuilder:
     def __init__(self):
-        # Use the directory where the script is located
+        # Betiğin çalıştığı 'scripts' klasörünü bul
         script_path = Path(__file__).parent.absolute()
-        self.base_dir = script_path
-        self.daemon_dir = self.base_dir / "Div-Acer-Manager-Max" / "DAMM-Daemon"
-        self.gui_dir = self.base_dir / "Div-Acer-Manager-Max" / "DivAcerManagerMax"
-        self.drivers_dir = self.base_dir / "Div-Linuwu-Sense"
-        self.publish_dir = self.base_dir / "Publish"
-        self.setup_script = self.base_dir / "Setup.sh"
         
-        # Icon files to copy
+        # Projenin ana dizinine (bir üst klasöre) dinamik olarak çık
+        self.base_dir = script_path.parent
+        
+        # Klasörleri ana dizinden otomatik bul
+        self.daemon_dir = self.base_dir / "DAMM-Daemon"
+        self.gui_dir = self.base_dir / "DivAcerManagerMax"
+        
+        # Sürücüler genelde ana klasörün yanına indirilir (opsiyonel)
+        self.drivers_dir = self.base_dir.parent / "Div-Linuwu-Sense"
+        self.publish_dir = self.base_dir / "Publish"
+        
+        # Kurulum betiğini scripts klasörünün içinde bul
+        self.setup_script = script_path / "local-setup.sh"
+        
         self.icon_files = [
             self.gui_dir / "icon.png",
-            Path("/home/div/Projects/Div-Acer-Manager-Max/DivAcerManagerMax/iconTransparent.png")
+            self.gui_dir / "iconTransparent.png"
         ]
         
         print(f"Script location: {script_path}")
@@ -37,10 +44,8 @@ class DAMXBuilder:
         print(f"Looking for:")
         print(f"  - Daemon: {self.daemon_dir}")
         print(f"  - GUI: {self.gui_dir}")
-        print(f"  - Drivers: {self.drivers_dir}")
-        print(f"  - Setup script: {self.setup_script}")
-        print(f"  - Icon files: {[str(f) for f in self.icon_files]}")
         print()
+        
         
     def get_version_info(self):
         """Automatically detect version information from source files"""
@@ -125,7 +130,7 @@ class DAMXBuilder:
         version_file = self.drivers_dir / "src" / "linuwu_sense.c"
         if not version_file.exists():
             print(f"Warning: Could not find version file at {version_file}")
-            return None
+            return "Unknown"
             
         try:
             with open(version_file, 'r') as f:
@@ -150,15 +155,15 @@ class DAMXBuilder:
             missing.append(f"Daemon directory: {self.daemon_dir}")
         if not self.gui_dir.exists():
             missing.append(f"GUI directory: {self.gui_dir}")
-        if not self.drivers_dir.exists():
-            missing.append(f"Drivers directory: {self.drivers_dir}")
+        #if not self.drivers_dir.exists():
+            #missing.append(f"Drivers directory: {self.drivers_dir}")
         if not self.setup_script.exists():
             missing.append(f"Setup script: {self.setup_script}")
             
         # Check icon files
         for icon_file in self.icon_files:
             if not icon_file.exists():
-                missing.append(f"Icon file: {icon_file}")
+               missing.append(f"Icon file: {icon_file}")
             
         if missing:
             print("Error: Missing required files/directories:")
@@ -338,12 +343,12 @@ class DAMXBuilder:
         print("Copying drivers...")
         
         if not self.drivers_dir.exists():
-            print(f"Error: Drivers directory not found at {self.drivers_dir}")
-            sys.exit(1)
+            print(f"Warning: Drivers directory not found at {self.drivers_dir}. Skipping...")
+            return  # <-- sys.exit(1) YERİNE return YAZDIK
         
         shutil.copytree(self.drivers_dir, drivers_target)
         print("✓ Drivers copied and renamed to Linuwu-Sense")
-    
+
     def update_setup_script(self, package_dir, versions):
         """Copy and update the setup script with version information"""
         print("Updating setup script...")
@@ -424,7 +429,7 @@ Components:
         self.update_setup_script(package_dir, versions)
         self.create_release_info(package_dir, versions)
         
-        print(f"\n🎉 Build and packaging completed successfully!")
+        print(f"\nSuccesfull: Build and packaging completed")
         print(f"Package location: {package_dir}")
         print(f"Package contents:")
         for item in package_dir.iterdir():
@@ -439,7 +444,7 @@ def main():
         print("\n⚠ Build cancelled by user")
         sys.exit(1)
     except Exception as e:
-        print(f"\n❌ Build failed: {e}")
+        print(f"\nBuild failed: {e}")
         sys.exit(1)
 
 
