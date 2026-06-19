@@ -14,3 +14,4 @@ buildPublish/
 DAMM-Daemon/build/
 
 DAMM-Daemon/dist/
+.idea/
