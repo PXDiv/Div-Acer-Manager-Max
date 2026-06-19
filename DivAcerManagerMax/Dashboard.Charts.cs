@@ -23,17 +23,29 @@ using SkiaSharp;
 
 namespace DivAcerManagerMax;
 
+/// <summary>
+/// This partial class file holds the charting/graphing logic for the Dashboard user control.
+/// It utilizes LiveChartsCore and SkiaSharp to build and display a real-time running timeline
+/// graph showing CPU and GPU temperature trends (measured in degrees Celsius).
+/// </summary>
 public partial class Dashboard
 {
+    /// <summary>
+    /// Initializes, configures, and binds the historical temperature graph elements.
+    /// It instantiates the backing observable history collections, configures the LineSeries properties
+    /// (such as line strokes, geometries, tooltips, and SkiaSharp fill colors), searches the visual tree
+    /// for the CartesianChart container, and assigns the custom configured X and Y axes formatting.
+    /// </summary>
     private void InitializeTemperatureGraph()
     {
-        // Initialize collections
+        // Instantiate the historical series backing collections to hold temperature metrics
         _cpuTempHistory = new ObservableCollection<double>();
         _gpuTempHistory = new ObservableCollection<double>();
 
-        // Initialize series
+        // Construct the series list that holds both CPU and GPU temperature curves
         _tempSeries = new ObservableCollection<ISeries>
         {
+            // Configure line parameters for the CPU Temperature tracking line
             new LineSeries<double>
             {
                 Values = _cpuTempHistory,
@@ -45,6 +57,7 @@ public partial class Dashboard
                 GeometrySize = 5,
                 XToolTipLabelFormatter = chartPoint => $"CPU: {chartPoint.Label}°C"
             },
+            // Configure line parameters for the GPU Temperature tracking line
             new LineSeries<double>
             {
                 Values = _gpuTempHistory,
@@ -58,19 +71,24 @@ public partial class Dashboard
             }
         };
 
-        // Initialize and configure the chart
+        // Query the AXAML design workspace to locate the TemperatureChart container element
         _temperatureChart = this.FindControl<CartesianChart>("TemperatureChart");
         if (_temperatureChart != null)
         {
+            // Bind the configured line series collections to the chart container
             _temperatureChart.Series = _tempSeries;
+            
+            // Configure the horizontal X Axis properties
             _temperatureChart.XAxes = new List<Axis>
             {
                 new()
                 {
                     Name = "Time",
-                    IsVisible = false
+                    IsVisible = false // Keep the axis ticks hidden to look clean and modern
                 }
             };
+            
+            // Configure the vertical Y Axis properties including styling paints
             _temperatureChart.YAxes = new List<Axis>
             {
                 new()

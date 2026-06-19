@@ -9,19 +9,48 @@ using Avalonia.LogicalTree;
 
 namespace DivAcerManagerMax;
 
+/// <summary>
+/// Immutable record structure that represents a supported translation language.
+/// It wraps a standard language code (such as "en", "es") and its localized name (such as "English", "Español").
+/// </summary>
+/// <param name="Code">The two-letter ISO language code.</param>
+/// <param name="NativeName">The native display name of the language.</param>
 public sealed record SupportedLanguage(string Code, string NativeName)
 {
+    /// <summary>
+    /// Overrides ToString() to return the native language name.
+    /// This allows dropdown lists and selection menus to display the name directly.
+    /// </summary>
+    /// <returns>A string containing the language's native name.</returns>
     public override string ToString() => NativeName;
 }
 
+/// <summary>
+/// Static class that handles UI localization and translation dictionary mapping.
+/// It loads translation dictionaries for English, Spanish, German, Italian, Portuguese, French,
+/// Polish, Russian, Turkish, Swedish, Japanese, Korean, Chinese, Arabic, and Ukrainian.
+/// It reads and saves the active language selection in a local settings file ("language.txt"),
+/// and uses logical tree searches to dynamically translate AXAML controls labeled with "loc:" tags.
+/// </summary>
 public static class LocalizationManager
 {
+    /// <summary>
+    /// The default language code ("en" for English) used as a fallback if no language file is found.
+    /// </summary>
     private const string DefaultLanguage = "en";
+
+    /// <summary>
+    /// The absolute path to the local text file containing the saved language code selection.
+    /// Located at ~/.config/DivAcerManagerMax/language.txt.
+    /// </summary>
     private static readonly string SettingsPath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
         "DivAcerManagerMax",
         "language.txt");
 
+    /// <summary>
+    /// The primary translation dictionary for English, containing the base keys and labels.
+    /// </summary>
     private static readonly Dictionary<string, string> English = new()
     {
         ["Common.Language"] = "Language",
@@ -159,6 +188,9 @@ public static class LocalizationManager
         ["Settings.LoadErrorMessage"] = "Error loading settings: {0}"
     };
 
+    /// <summary>
+    /// Maps language codes to their respective translation dictionaries, created by merging translated overrides with English base dictionaries.
+    /// </summary>
     private static readonly Dictionary<string, Dictionary<string, string>> Translations = new()
     {
         ["en"] = English,
@@ -197,7 +229,7 @@ public static class LocalizationManager
             ["Tabs.FanProfiles"] = "Perfis de ventilacao", ["FanProfiles.Title"] = "Perfis de ventilacao",
             ["FanProfiles.CurveEditor"] = "Editor de curva", ["Power.Title"] = "Energia e desempenho",
             ["Battery.Title"] = "Controles da bateria", ["Keyboard.Title"] = "Iluminacao do teclado",
-            ["Settings.Title"] = "Configuracoes do sistema", ["Daemon.NotConnected"] = "Daemon nao conectado"
+            ["Settings.Title"] = "Configuracoes do sistema", ["Daemon.NaoConectado"] = "Daemon nao conectado"
         }),
         ["fr"] = MergeTranslations(new Dictionary<string, string> { ["Common.Language"] = "Langue", ["Common.Save"] = "Enregistrer", ["Tabs.FanProfiles"] = "Profils de ventilation", ["Settings.Title"] = "Parametres systeme" }),
         ["nl"] = MergeTranslations(new Dictionary<string, string> { ["Common.Language"] = "Taal", ["Common.Save"] = "Opslaan", ["Tabs.FanProfiles"] = "Ventilatorprofielen", ["Settings.Title"] = "Systeeminstellingen" }),
@@ -212,18 +244,21 @@ public static class LocalizationManager
         ["uk"] = MergeTranslations(new Dictionary<string, string> { ["Common.Language"] = "Mova", ["Common.Save"] = "Zberehty", ["Tabs.FanProfiles"] = "Profili ventyliatoriv", ["Settings.Title"] = "Nalashtuvannia systemy" })
     };
 
+    /// <summary>
+    /// Predefined list of SupportedLanguage templates mapping user-selectable codes to their native labels.
+    /// </summary>
     public static IReadOnlyList<SupportedLanguage> SupportedLanguages { get; } =
     [
         new("en", "English"),
         new("de", "Deutsch"),
         new("it", "Italiano"),
-        new("pt", "Portugues"),
-        new("es", "Espanol"),
-        new("fr", "Francais"),
+        new("pt", "Português"),
+        new("es", "Español"),
+        new("fr", "Français"),
         new("nl", "Nederlands"),
         new("pl", "Polski"),
-        new("ru", "Russkiy"),
-        new("tr", "Turkce"),
+        new("ru", "Русский"),
+        new("tr", "Türkçe"),
         new("sv", "Svenska"),
         new("ja", "Japanese"),
         new("ko", "Korean"),
@@ -232,13 +267,29 @@ public static class LocalizationManager
         new("uk", "Ukrainian")
     ];
 
+    /// <summary>
+    /// Gets the active language selection code, initialized from disk or system preferences.
+    /// </summary>
     public static string CurrentLanguageCode { get; private set; } = LoadLanguageCode();
 
+    /// <summary>
+    /// Gets the SupportedLanguage metadata object corresponding to the current language selection code.
+    /// </summary>
     public static SupportedLanguage CurrentLanguage =>
         SupportedLanguages.FirstOrDefault(language => language.Code == CurrentLanguageCode) ?? SupportedLanguages[0];
 
+    /// <summary>
+    /// Static event raised when the language selection changes, prompting UI view updates.
+    /// </summary>
     public static event EventHandler? LanguageChanged;
 
+    /// <summary>
+    /// Returns the localized string translation corresponding to the given dictionary key.
+    /// Falls back to the English dictionary representation if the active translation language
+    /// does not define the key. Returns the raw key if no match is found.
+    /// </summary>
+    /// <param name="key">The dictionary key string to look up.</param>
+    /// <returns>A localized translation string.</returns>
     public static string T(string key)
     {
         if (Translations.TryGetValue(CurrentLanguageCode, out var language) && language.TryGetValue(key, out var value))
@@ -247,31 +298,53 @@ public static class LocalizationManager
         return English.TryGetValue(key, out var fallback) ? fallback : key;
     }
 
+    /// <summary>
+    /// Formats a localized template string using standard formatting arguments.
+    /// </summary>
+    /// <param name="key">The dictionary key string to look up.</param>
+    /// <param name="args">The formatting arguments to inject into the template placeholders.</param>
+    /// <returns>A formatted translation string.</returns>
     public static string Format(string key, params object[] args)
     {
         return string.Format(CultureInfo.CurrentCulture, T(key), args);
     }
 
+    /// <summary>
+    /// Updates the active language code, saves it to ~/.config/DivAcerManagerMax/language.txt,
+    /// and raises the LanguageChanged event to trigger layout redraws.
+    /// </summary>
+    /// <param name="code">The target language code to apply (e.g. "es").</param>
     public static void SetLanguage(string code)
     {
+        // Cancel operation if the language code is invalid or already active
         if (!Translations.ContainsKey(code) || CurrentLanguageCode == code)
             return;
 
         CurrentLanguageCode = code;
         Directory.CreateDirectory(Path.GetDirectoryName(SettingsPath)!);
         File.WriteAllText(SettingsPath, code);
+        
+        // Notify observers to apply new translation strings
         LanguageChanged?.Invoke(null, EventArgs.Empty);
     }
 
+    /// <summary>
+    /// Traverses the logical children tree starting from the specified root layout control,
+    /// searching for elements configured with translation tags (control.Tag matching "loc:").
+    /// Matches the tag name with the translation dictionary and replaces the text value on the target element.
+    /// </summary>
+    /// <param name="root">The root visual control containing child nodes to localize.</param>
     public static void Apply(Control root)
     {
         foreach (var control in root.GetLogicalDescendants().OfType<Control>().Prepend(root))
         {
+            // Filter elements configured with translation tag bindings (e.g. Tag="loc:Common.Save")
             if (control.Tag is not string tag || !tag.StartsWith("loc:", StringComparison.Ordinal))
                 continue;
 
-            var key = tag[4..];
-            var value = T(key);
+            var key = tag[4..]; // Slice the "loc:" prefix off the key name
+            var value = T(key); // Query the localized string value
+            
             switch (control)
             {
                 case TextBlock textBlock:
@@ -287,6 +360,12 @@ public static class LocalizationManager
         }
     }
 
+    /// <summary>
+    /// Initializer helper that reads the user's preferred language from disk.
+    /// If no file exists, it queries CultureInfo.CurrentUICulture.TwoLetterISOLanguageName
+    /// and matches it against supported languages. Defaults to English ("en") if unsupported.
+    /// </summary>
+    /// <returns>A validated two-character language code string.</returns>
     private static string LoadLanguageCode()
     {
         if (File.Exists(SettingsPath))
@@ -300,6 +379,11 @@ public static class LocalizationManager
         return Translations.ContainsKey(culture) ? culture : DefaultLanguage;
     }
 
+    /// <summary>
+    /// Dictionary utility method to copy base English keys and overwrite them with localized keys.
+    /// </summary>
+    /// <param name="overrides">The translated keys dictionary to merge.</param>
+    /// <returns>A complete dictionary containing base English templates merged with overrides.</returns>
     private static Dictionary<string, string> MergeTranslations(Dictionary<string, string> overrides)
     {
         var merged = new Dictionary<string, string>(English);

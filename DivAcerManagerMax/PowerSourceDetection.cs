@@ -6,17 +6,42 @@ using System.Timers;
 using Avalonia.Controls;
 using Avalonia.Threading;
 
+/// <summary>
+/// The PowerSourceDetection class is responsible for detecting whether the laptop is currently
+/// connected to an external AC power source (plugged in) or running on battery power (discharged).
+/// It periodically scans standard Linux power supply driver nodes under "/sys/class/power_supply",
+/// falls back to calling terminal utilities like "upower" or "acpi" if necessary, and keeps an Avalonia
+/// ToggleSwitch synchronized with the system's power state.
+/// </summary>
 public class PowerSourceDetection
 {
+    /// <summary>
+    /// A list of candidate absolute filesystem paths pointing to the 'online' status files of common AC adapters in Linux.
+    /// Values read from these paths (typically "1" for plugged in, "0" for battery) indicate the current AC status.
+    /// </summary>
     private readonly List<string> _possiblePowerSupplyPaths;
+
+    /// <summary>
+    /// A System.Timers.Timer instance that periodically fires at fixed intervals (every 5 seconds) to trigger power queries.
+    /// </summary>
     private readonly Timer _powerSourceCheckTimer;
+
+    /// <summary>
+    /// Reference to the Avalonia ToggleSwitch control that represents the power connection state in the UI.
+    /// </summary>
     private readonly ToggleSwitch _powerToggleSwitch;
 
+    /// <summary>
+    /// Initializes a new instance of the PowerSourceDetection class.
+    /// It references the target UI toggle control, populates candidate sysfs file paths,
+    /// sets up a 5-second recurring timer loop, and executes an initial power detection query.
+    /// </summary>
+    /// <param name="powerToggleSwitch">The UI ToggleSwitch control representing the power source status.</param>
     public PowerSourceDetection(ToggleSwitch powerToggleSwitch)
     {
         _powerToggleSwitch = powerToggleSwitch;
 
-        // Common paths for power supply status on Linux systems
+        // Populate common Linux AC adapter online status sysfs files
         _possiblePowerSupplyPaths = new List<string>
         {
             "/sys/class/power_supply/AC/online",
@@ -25,51 +50,76 @@ public class PowerSourceDetection
             "/sys/class/power_supply/AC0/online"
         };
 
-        // Initialize and start the timer to check power source every 5 seconds
+        // Configure the timer to poll the system power status every 5000 milliseconds (5 seconds)
         _powerSourceCheckTimer = new Timer(5000);
         _powerSourceCheckTimer.Elapsed += OnTimerElapsed;
         _powerSourceCheckTimer.AutoReset = true;
         _powerSourceCheckTimer.Start();
 
-        // Initial check of power source
+        // Run the first check immediately to align the UI switch state during application startup
         UpdatePowerSourceStatus();
     }
 
+    /// <summary>
+    /// Event handler invoked when the check timer fires. Triggers the power source status update.
+    /// </summary>
+    /// <param name="sender">The source of the event (the Timer instance).</param>
+    /// <param name="e">Event parameters containing details about the elapsed timer tick.</param>
     private void OnTimerElapsed(object sender, ElapsedEventArgs e)
     {
         UpdatePowerSourceStatus();
     }
 
+    /// <summary>
+    /// Polls the physical power supply status and schedules a UI update on the Avalonia UI Thread.
+    /// This keeps the associated ToggleSwitch state synchronized with the hardware state.
+    /// </summary>
     private void UpdatePowerSourceStatus()
     {
+        // Query whether the laptop is currently running on external AC power
         var isPluggedIn = IsLaptopPluggedIn();
 
-        // Update UI on UI thread
+        // Dispatch a UI thread task to safely update the ToggleSwitch's IsChecked property
         Dispatcher.UIThread.InvokeAsync(() => { _powerToggleSwitch.IsChecked = isPluggedIn; });
     }
 
+    /// <summary>
+    /// Checks the system's power state.
+    /// It iterates through potential sysfs adapter nodes to read their online status (matching "1").
+    /// If none of the sysfs files are found or readable, it falls back to parsing output from "upower".
+    /// If exceptions are raised, it returns false as a safe fallback.
+    /// </summary>
+    /// <returns>True if the laptop is connected to an external AC power source, false otherwise.</returns>
     private bool IsLaptopPluggedIn()
     {
         try
         {
-            // Try each possible path for power supply status
+            // Iterate through each possible sysfs path to find an active AC adapter node
             foreach (var path in _possiblePowerSupplyPaths)
                 if (File.Exists(path))
                 {
+                    // Read the status character (typically "1" for connected, "0" for disconnected)
                     var status = File.ReadAllText(path).Trim();
                     return status == "1";
                 }
 
-            // If no power supply file is found, try to check using UPower command-line tool
+            // Fall back to UPower command queries if no direct files were found in sysfs
             return CheckUsingUPower();
         }
         catch (Exception ex)
         {
+            // Output the error message to stdout for troubleshooting and default to false
             Console.WriteLine($"Error checking power status: {ex.Message}");
             return false;
         }
     }
 
+    /// <summary>
+    /// Checks the power status by executing the "upower" CLI tool in a hidden background process.
+    /// It queries the standard AC device configuration and checks if the output contains "online: yes".
+    /// If upower is unavailable or fails, it falls back to calling CheckUsingLsAcpi().
+    /// </summary>
+    /// <returns>True if the AC adapter is reported online, false otherwise.</returns>
     private bool CheckUsingUPower()
     {
         try
@@ -86,19 +136,24 @@ public class PowerSourceDetection
                 var output = process.StandardOutput.ReadToEnd();
                 process.WaitForExit();
 
-                // Check if the output contains the online status
+                // If upower returns positive adapter status, return true
                 if (output.Contains("online:") && output.Contains("yes")) return true;
             }
         }
         catch
         {
-            // UPower command failed, try alternative method
+            // If upower fails (e.g. not installed), fall back to ACPI tool command queries
             return CheckUsingLsAcpi();
         }
 
         return false;
     }
 
+    /// <summary>
+    /// Checks the power status by running the "acpi" command-line utility.
+    /// It executes "acpi -a" and checks if the output contains the string "on-line".
+    /// </summary>
+    /// <returns>True if the AC adapter is reported on-line, false otherwise.</returns>
     private bool CheckUsingLsAcpi()
     {
         try
@@ -115,7 +170,7 @@ public class PowerSourceDetection
                 var output = process.StandardOutput.ReadToEnd();
                 process.WaitForExit();
 
-                // Check if the output indicates AC adapter is on-line
+                // Check if the command output confirms adapter line status
                 return output.Contains("on-line");
             }
         }

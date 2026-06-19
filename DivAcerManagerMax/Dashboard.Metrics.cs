@@ -23,12 +23,25 @@ using SkiaSharp;
 
 namespace DivAcerManagerMax;
 
+/// <summary>
+/// This partial class file holds the system metrics collection logic for the Dashboard user control.
+/// It parses Linux /proc virtual filesystem directories (/proc/stat, /proc/meminfo), system hardware logs,
+/// GPU statistics tools, and battery descriptors to compute real-time CPU utilization, RAM usage,
+/// temperatures, battery percentages, and battery charging or discharging times.
+/// </summary>
 public partial class Dashboard
 {
+    /// <summary>
+    /// Computes the overall CPU utilization percentage by reading the user, nice, system, and idle ticks
+    /// from "/proc/stat" at two different timestamps separated by a brief 100ms sleeping interval.
+    /// The formula used is: CPU% = (1.0 - (idle_ticks_delta / total_ticks_delta)) * 100.0.
+    /// </summary>
+    /// <returns>A double representing the current total CPU utilization percentage (0.0 to 100.0).</returns>
     private double GetCpuUsage()
     {
         try
         {
+            // Read initial tick values from proc stat
             var statBefore = File.ReadAllText("/proc/stat");
             var matchBefore = Regex.Match(statBefore, @"^cpu\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)");
 
@@ -39,9 +52,10 @@ public partial class Dashboard
                 var system1 = long.Parse(matchBefore.Groups[3].Value);
                 var idle1 = long.Parse(matchBefore.Groups[4].Value);
 
-                // Small sleep to measure difference
+                // Pause thread briefly to generate a timing delta
                 Thread.Sleep(100);
 
+                // Read final tick values from proc stat
                 var statAfter = File.ReadAllText("/proc/stat");
                 var matchAfter = Regex.Match(statAfter, @"^cpu\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)");
 
@@ -52,11 +66,13 @@ public partial class Dashboard
                     var system2 = long.Parse(matchAfter.Groups[3].Value);
                     var idle2 = long.Parse(matchAfter.Groups[4].Value);
 
+                    // Compute total ticks and idle ticks
                     var totalBefore = user1 + nice1 + system1 + idle1;
                     var totalAfter = user2 + nice2 + system2 + idle2;
                     var totalDelta = totalAfter - totalBefore;
                     var idleDelta = idle2 - idle1;
 
+                    // Calculate utilization ratio and convert to percentage
                     var cpuUsage = (1.0 - idleDelta / (double)totalDelta) * 100.0;
                     return Math.Round(cpuUsage, 1);
                 }
@@ -70,11 +86,19 @@ public partial class Dashboard
         }
     }
 
+    /// <summary>
+    /// Retrieves the current CPU temperature in degrees Celsius.
+    /// It first checks if multiple core temperature files are indexed in the sysfs path cache. If so, it calculates the
+    /// mathematical average of all valid core readings. If not, it falls back to a single monitored sysfs node.
+    /// If direct filesystem reads are unsuccessful, it tries to parse standard output from the lm-sensors command.
+    /// Temperatures are divided by 1000.0 as Linux sysfs files report temperatures in milli-degrees Celsius.
+    /// </summary>
+    /// <returns>A double representing the current average CPU temperature in degrees Celsius.</returns>
     private double GetCpuTemperature()
     {
         try
         {
-            // Check for multiple temperature files from hwmon6
+            // 1. Check for multiple temperature nodes (e.g. multi-core hwmon files)
             if (_systemInfoPaths.ContainsKey("cpu_temp_files"))
             {
                 var tempFiles = _systemInfoPaths["cpu_temp_files"].Split(',');
@@ -89,38 +113,35 @@ public partial class Dashboard
                             var temperatureStr = File.ReadAllText(tempFile).Trim();
                             if (int.TryParse(temperatureStr, out var tempValue))
                             {
-                                // Temperature is often reported in millidegrees C
+                                // Convert milli-degrees Celsius to standard Celsius
                                 tempSum += tempValue / 1000.0;
                                 validReadings++;
                             }
                         }
 
                     if (validReadings > 0)
-                        // Calculate average temperature
                         return Math.Round(tempSum / validReadings, 1);
                 }
             }
 
-            // Fallback to single temperature file if available
+            // 2. Fallback to a single monitored temperature node path
             if (_systemInfoPaths.ContainsKey("cpu_temp") && File.Exists(_systemInfoPaths["cpu_temp"]))
             {
                 var temperatureStr = File.ReadAllText(_systemInfoPaths["cpu_temp"]).Trim();
                 if (int.TryParse(temperatureStr, out var tempValue))
                 {
-                    // Temperature is often reported in millidegrees C
                     var tempC = tempValue / 1000.0;
                     return Math.Round(tempC, 1);
                 }
             }
 
-            // Fallback to lm-sensors if available
+            // 3. Last resort fallback: run the sensors command and parse text output using regular expressions
             var output = RunCommand("sensors", "");
             var match = Regex.Match(output, @"Package id \d+:\s+\+?(\d+\.\d+)°C");
             if (match.Success)
                 if (double.TryParse(match.Groups[1].Value, out var tempC))
                     return Math.Round(tempC, 1);
 
-            // Couldn't get temperature
             return 0;
         }
         catch (Exception ex)
@@ -130,12 +151,20 @@ public partial class Dashboard
         }
     }
 
+    /// <summary>
+    /// Computes the system RAM utilization percentage by reading the absolute memory stats from "/proc/meminfo".
+    /// It matches MemTotal and MemAvailable properties using regular expressions, calculates the used RAM
+    /// (Total - Available), and calculates the percentage.
+    /// </summary>
+    /// <returns>A double representing the current RAM utilization percentage (0.0 to 100.0).</returns>
     private double GetRamUsage()
     {
         try
         {
+            // Read memory info file contents
             var memInfo = File.ReadAllText("/proc/meminfo");
 
+            // Extract total memory and available memory metrics in kilobytes
             var totalMatch = Regex.Match(memInfo, @"MemTotal:\s+(\d+) kB");
             var availableMatch = Regex.Match(memInfo, @"MemAvailable:\s+(\d+) kB");
 
@@ -145,6 +174,7 @@ public partial class Dashboard
                 var availableKb = long.Parse(availableMatch.Groups[1].Value);
                 var usedKb = totalKb - availableKb;
 
+                // Calculate ratio and convert to percentage
                 var usagePercentage = usedKb / (double)totalKb * 100.0;
                 return Math.Round(usagePercentage, 1);
             }
@@ -157,6 +187,11 @@ public partial class Dashboard
         }
     }
 
+    /// <summary>
+    /// Obtains the current operating temperature and usage percentage metrics for the system graphics card.
+    /// It delegates the request to dedicated query procedures depending on the GPU type detected (NVIDIA, AMD, or Intel).
+    /// </summary>
+    /// <returns>A tuple of doubles (temperature, usage) representing Celsius and percentage values.</returns>
     private (double temperature, double usage) GetGpuMetrics()
     {
         try
@@ -179,6 +214,11 @@ public partial class Dashboard
         }
     }
 
+    /// <summary>
+    /// Queries metrics for NVIDIA graphics processors using the proprietary command-line utility "nvidia-smi".
+    /// It executes queries for temperature.gpu and utilization.gpu, parsing the outputs.
+    /// </summary>
+    /// <returns>A tuple of doubles (temperature, usage) representing Celsius and percentage values.</returns>
     private (double temperature, double usage) GetNvidiaGpuMetrics()
     {
         try
@@ -186,19 +226,19 @@ public partial class Dashboard
             double temp = 0;
             double usage = 0;
 
-            // Get GPU temperature
+            // Retrieve temperature in Celsius from nvidia-smi
             var tempOutput = RunCommand("nvidia-smi", "--query-gpu=temperature.gpu --format=csv,noheader");
             if (double.TryParse(tempOutput.Trim(), out temp))
             {
-                // temperature is already in celsius
+                // Parsing succeeded
             }
 
-            // Get GPU utilization
+            // Retrieve utilization speed percentage from nvidia-smi
             var utilOutput = RunCommand("nvidia-smi", "--query-gpu=utilization.gpu --format=csv,noheader");
             var utilMatch = Regex.Match(utilOutput, @"(\d+)");
             if (utilMatch.Success && double.TryParse(utilMatch.Groups[1].Value, out usage))
             {
-                // usage is already in percentage
+                // Parsing succeeded
             }
 
             return (temp, usage);
@@ -209,6 +249,12 @@ public partial class Dashboard
         }
     }
 
+    /// <summary>
+    /// Queries metrics for AMD graphics processors by reading specific sysfs monitoring nodes
+    /// (such as drm/card0 driver directories).
+    /// If sysfs nodes are unavailable, it executes the AMD tool "radeontop" in background mode to parse metrics.
+    /// </summary>
+    /// <returns>A tuple of doubles (temperature, usage) representing Celsius and percentage values.</returns>
     private (double temperature, double usage) GetAmdGpuMetrics()
     {
         try
@@ -216,22 +262,22 @@ public partial class Dashboard
             double temp = 0;
             double usage = 0;
 
-            // Use cached GPU temp path if available
+            // Read AMD temperature from sysfs (reported in milli-degrees Celsius)
             if (_systemInfoPaths.ContainsKey("gpu_temp") && File.Exists(_systemInfoPaths["gpu_temp"]))
             {
                 var tempStr = File.ReadAllText(_systemInfoPaths["gpu_temp"]);
                 if (int.TryParse(tempStr.Trim(), out var tempValue))
-                    temp = tempValue / 1000.0; // Convert from milliCelsius to Celsius
+                    temp = tempValue / 1000.0;
             }
 
-            // Use cached GPU usage path if available
+            // Read AMD utilization from sysfs (reported in percentage)
             if (_systemInfoPaths.ContainsKey("gpu_usage") && File.Exists(_systemInfoPaths["gpu_usage"]))
             {
                 var usageStr = File.ReadAllText(_systemInfoPaths["gpu_usage"]);
                 if (int.TryParse(usageStr.Trim(), out var usageValue)) usage = usageValue;
             }
 
-            // If we couldn't get values from cached paths, try radeontop
+            // Fallback command: parse output from radeontop CLI utility if values remain zero
             if (temp == 0 || usage == 0)
             {
                 var radeontopOutput = RunCommand("radeontop", "-d- -l1");
@@ -255,6 +301,11 @@ public partial class Dashboard
         }
     }
 
+    /// <summary>
+    /// Queries metrics for Intel integrated graphics processors by reading thermal zone sysfs nodes.
+    /// If usage metrics cannot be located on disk, it invokes the CLI command "intel_gpu_top" to read utilization.
+    /// </summary>
+    /// <returns>A tuple of doubles (temperature, usage) representing Celsius and percentage values.</returns>
     private (double temperature, double usage) GetIntelGpuMetrics()
     {
         try
@@ -262,15 +313,15 @@ public partial class Dashboard
             double temp = 0;
             double usage = 0;
 
-            // Use cached GPU temp path if available
+            // Read Intel GPU temperature from sysfs
             if (_systemInfoPaths.ContainsKey("gpu_temp") && File.Exists(_systemInfoPaths["gpu_temp"]))
             {
                 var tempStr = File.ReadAllText(_systemInfoPaths["gpu_temp"]);
                 if (int.TryParse(tempStr.Trim(), out var tempValue))
-                    temp = tempValue / 1000.0; // Convert from milliCelsius to Celsius
+                    temp = tempValue / 1000.0;
             }
 
-            // For usage, we might be able to use the intel_gpu_top tool
+            // Read Intel GPU utilization using intel_gpu_top statistics output
             var intelOutput = RunCommand("intel_gpu_top", "-o -");
             var match = Regex.Match(intelOutput, @"Render/3D.*?(\d+)%");
             if (match.Success)
@@ -285,8 +336,16 @@ public partial class Dashboard
         }
     }
 
+    /// <summary>
+    /// Reads charging, capacity, and current power rates for the laptop battery from sysfs nodes
+    /// (energy_now, charge_now, power_now, current_now) cached inside _batteryDir.
+    /// It calculates the battery percentage, reads status (e.g. Charging, Discharging), and estimates the
+    /// remaining battery runtime (in hours) using: remaining_hours = energy_now / power_now.
+    /// </summary>
+    /// <returns>A tuple containing battery percentage (int), status text (string), and remaining runtime hours (double).</returns>
     private (int percentage, string status, double timeRemaining) GetBatteryInfo()
     {
+        // Return blank values if the host computer does not possess a battery unit (e.g. desktop PCs)
         if (!HasBattery) return (0, "No Battery", 0);
 
         try
@@ -295,7 +354,7 @@ public partial class Dashboard
             var status = "Unknown";
             double timeRemaining = 0;
 
-            // Read from cached paths
+            // Read battery capacity level percentage from sysfs file (usually 0-100)
             if (_systemInfoPaths.ContainsKey("capacity") && File.Exists(_systemInfoPaths["capacity"]))
             {
                 var capacityStr = File.ReadAllText(_systemInfoPaths["capacity"]).Trim();
@@ -303,9 +362,11 @@ public partial class Dashboard
                     percentage = capacity;
             }
 
+            // Read battery operational status (e.g., "Full", "Charging", "Discharging", "Not charging")
             if (_systemInfoPaths.ContainsKey("status") && File.Exists(_systemInfoPaths["status"]))
                 status = File.ReadAllText(_systemInfoPaths["status"]).Trim();
 
+            // Calculate remaining charging or discharging battery hours
             if (_systemInfoPaths.ContainsKey("energy_now") && File.Exists(_systemInfoPaths["energy_now"]) &&
                 _systemInfoPaths.ContainsKey("power_now") && File.Exists(_systemInfoPaths["power_now"]) &&
                 _systemInfoPaths.ContainsKey("energy_full") && File.Exists(_systemInfoPaths["energy_full"]))
@@ -315,9 +376,9 @@ public partial class Dashboard
                     if (powerNow > 0)
                     {
                         if (status == "Discharging")
-                            timeRemaining = energyNow / powerNow;
+                            timeRemaining = energyNow / powerNow; // Hours remaining until empty
                         else if (status == "Charging")
-                            timeRemaining = (energyFull - energyNow) / powerNow;
+                            timeRemaining = (energyFull - energyNow) / powerNow; // Hours remaining until full
                     }
 
             return (percentage, status, timeRemaining);
