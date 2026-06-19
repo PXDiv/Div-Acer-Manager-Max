@@ -1,7 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
     <PropertyGroup>
         <OutputType>WinExe</OutputType>
-        <TargetFramework>net9.0</TargetFramework>
+        <TargetFramework>net10.0</TargetFramework>
         <Nullable>enable</Nullable>
         <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
         <ApplicationManifest>app.manifest</ApplicationManifest>
@@ -9,21 +9,22 @@
     </PropertyGroup>
 
     <ItemGroup>
-        <PackageReference Include="Avalonia" Version="11.3.0"/>
-        <PackageReference Include="Avalonia.Controls.ColorPicker" Version="11.3.0"/>
-        <PackageReference Include="Avalonia.Desktop" Version="11.3.0"/>
-        <PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.0"/>
-        <PackageReference Include="Avalonia.Fonts.Inter" Version="11.3.0"/>
+        <PackageReference Include="Avalonia" Version="11.3.17" />
+        <PackageReference Include="Avalonia.Controls.ColorPicker" Version="11.3.17" />
+        <PackageReference Include="Avalonia.Desktop" Version="11.3.17" />
+        <PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.17" />
+        <PackageReference Include="Avalonia.Fonts.Inter" Version="11.3.17" />
         <!--Condition below is needed to remove Avalonia.Diagnostics package from build output in Release configuration.-->
-        <PackageReference Include="Avalonia.Diagnostics" Version="11.3.0">
+        <PackageReference Include="Avalonia.Diagnostics" Version="11.3.17">
             <IncludeAssets Condition="'$(Configuration)' != 'Debug'">None</IncludeAssets>
             <PrivateAssets Condition="'$(Configuration)' != 'Debug'">All</PrivateAssets>
         </PackageReference>
-        <PackageReference Include="LiveChartsCore.SkiaSharpView.Avalonia" Version="2.0.0-rc5.4"/>
-        <PackageReference Include="Material.Icons" Version="3.0.0-preview1.1"/>
-        <PackageReference Include="Material.Icons.Avalonia" Version="2.4.1"/>
+        <PackageReference Include="LiveChartsCore.SkiaSharpView" Version="2.0.4" />
+        <PackageReference Include="LiveChartsCore.SkiaSharpView.Avalonia" Version="2.0.4" />
+        <PackageReference Include="Material.Icons" Version="3.0.2" />
+        <PackageReference Include="Material.Icons.Avalonia" Version="2.4.1" />
         <PackageReference Include="MaterialDesign.Icons" Version="1.1.0"/>
-        <PackageReference Include="MessageBox.Avalonia" Version="3.2.0"/>
+        <PackageReference Include="MessageBox.Avalonia" Version="3.2.0" />
     </ItemGroup>
 
     <ItemGroup>
@@ -46,6 +47,9 @@
     <ItemGroup>
         <Compile Update="Dashboard.axaml.cs">
             <DependentUpon>Dashboard.axaml</DependentUpon>
+        </Compile>
+        <Compile Update="FanProfiles.axaml.cs">
+            <DependentUpon>FanProfiles.axaml</DependentUpon>
         </Compile>
         <Compile Update="InternalsManager.axaml.cs">
             <DependentUpon>InternalsManager.axaml</DependentUpon>

@@ -1,0 +1,121 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:views="clr-namespace:DivAcerManagerMax"
+             xmlns:material="using:Material.Icons.Avalonia"
+             x:Class="DivAcerManagerMax.FanProfiles"
+             x:DataType="views:FanProfiles">
+    <ScrollViewer>
+        <StackPanel Margin="10,0,20,0">
+            <TextBlock Text="Fan Profiles" Tag="loc:FanProfiles.Title" Classes="SectionHeader" />
+
+            <Grid ColumnDefinitions="280,*" ColumnSpacing="16">
+                <Border Classes="Card" Grid.Column="0">
+                    <StackPanel Spacing="12">
+                        <Grid ColumnDefinitions="*,Auto">
+                            <TextBlock Text="Profiles" Tag="loc:FanProfiles.Profiles" Classes="SubHeader" />
+                            <material:MaterialIcon Grid.Column="1" Kind="FanClock" Width="24" Height="24" />
+                        </Grid>
+
+                        <ListBox x:Name="ProfilesListBox"
+                                 ItemsSource="{Binding Profiles}"
+                                 SelectedItem="{Binding SelectedProfile}"
+                                 MinHeight="360">
+                            <ListBox.ItemTemplate>
+                                <DataTemplate x:DataType="views:FanProfile">
+                                    <StackPanel Margin="0,4">
+                                        <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
+                                        <TextBlock Text="{Binding Target}" Opacity="0.65" FontSize="12" />
+                                    </StackPanel>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+
+                        <Grid ColumnDefinitions="*,*" ColumnSpacing="8">
+                            <Button Grid.Column="0" x:Name="AddProfileButton" Content="New" Tag="loc:Common.New" />
+                            <Button Grid.Column="1" x:Name="DuplicateProfileButton" Content="Duplicate" Tag="loc:Common.Duplicate" />
+                        </Grid>
+                        <Button x:Name="DeleteProfileButton" Content="Delete" Tag="loc:Common.Delete" />
+                    </StackPanel>
+                </Border>
+
+                <StackPanel Grid.Column="1" Spacing="12">
+                    <Border Classes="Card">
+                        <StackPanel Spacing="12">
+                            <Grid ColumnDefinitions="*,Auto">
+                                <TextBlock Text="Curve Editor" Tag="loc:FanProfiles.CurveEditor" Classes="SubHeader" />
+                                <material:MaterialIcon Grid.Column="1" Kind="ChartBellCurve" Width="24" Height="24" />
+                            </Grid>
+
+                            <Grid ColumnDefinitions="*,220" ColumnSpacing="16">
+                                <StackPanel Grid.Column="0" Spacing="8">
+                                    <Grid ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto" RowSpacing="10" ColumnSpacing="12">
+                                        <TextBlock Grid.Row="0" Grid.Column="0" Text="Name" Tag="loc:Common.Name" VerticalAlignment="Center" Width="70" />
+                                        <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding SelectedProfile.Name}" />
+
+                                        <TextBlock Grid.Row="1" Grid.Column="0" Text="Target" Tag="loc:Common.Target" VerticalAlignment="Center" Width="70" />
+                                        <ComboBox Grid.Row="1" Grid.Column="1"
+                                                  x:Name="TargetComboBox"
+                                                  ItemsSource="{Binding TargetOptions}"
+                                                  SelectedItem="{Binding SelectedProfile.Target}">
+                                        </ComboBox>
+                                    </Grid>
+
+                                    <Border BorderBrush="#303036" BorderThickness="1" CornerRadius="6" ClipToBounds="True">
+                                        <views:FanCurveEditor x:Name="CurveEditor"
+                                                              Height="320"
+                                                              Points="{Binding SelectedProfile.Points}" />
+                                    </Border>
+
+                                    <Grid ColumnDefinitions="Auto,*,Auto">
+                                        <TextBlock Text="20°C" Opacity="0.65" />
+                                        <TextBlock Grid.Column="1" Text="Temperature" Tag="loc:Common.Temperature" HorizontalAlignment="Center" Opacity="0.65" />
+                                        <TextBlock Grid.Column="2" Text="100°C" Opacity="0.65" />
+                                    </Grid>
+                                </StackPanel>
+
+                                <StackPanel Grid.Column="1" Spacing="8">
+                                    <TextBlock Text="Points" Tag="loc:Common.Points" FontWeight="SemiBold" />
+                                    <ItemsControl ItemsSource="{Binding SelectedProfile.Points}">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate x:DataType="views:FanCurvePoint">
+                                                <Grid ColumnDefinitions="*,*" ColumnSpacing="8" Margin="0,0,0,8">
+                                                    <NumericUpDown Grid.Column="0"
+                                                                   Minimum="20"
+                                                                   Maximum="100"
+                                                                   Value="{Binding Temperature}" />
+                                                    <NumericUpDown Grid.Column="1"
+                                                                   Minimum="0"
+                                                                   Maximum="100"
+                                                                   Value="{Binding FanPercent}" />
+                                                </Grid>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                    <Button x:Name="AddPointButton" Content="Add Point" Tag="loc:FanProfiles.AddPoint" />
+                                    <Button x:Name="RemovePointButton" Content="Remove Point" Tag="loc:FanProfiles.RemovePoint" />
+                                </StackPanel>
+                            </Grid>
+                        </StackPanel>
+                    </Border>
+
+                    <Border Classes="Card">
+                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                            <StackPanel>
+                                <TextBlock Text="Profile Application" Tag="loc:FanProfiles.ProfileApplication" Classes="SubHeader" />
+                                <TextBlock x:Name="StatusTextBlock"
+                                           Text="Profiles are saved locally. Applying sends the selected curve's current fan value as a manual speed."
+                                           Tag="loc:FanProfiles.InitialStatus"
+                                           Opacity="0.7"
+                                           TextWrapping="Wrap" />
+                            </StackPanel>
+                            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                <Button x:Name="SaveProfilesButton" Content="Save" Tag="loc:Common.Save" />
+                                <Button x:Name="ApplyProfileButton" Content="Apply Now" Tag="loc:Common.ApplyNow" />
+                            </StackPanel>
+                        </Grid>
+                    </Border>
+                </StackPanel>
+            </Grid>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

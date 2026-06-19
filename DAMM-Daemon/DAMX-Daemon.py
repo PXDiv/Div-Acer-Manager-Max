@@ -19,7 +19,7 @@ from pathlib import Path
 from enum import Enum
 from PowerSourceDetection import PowerSourceDetector 
 from typing import Dict, List, Tuple, Set
-# from KeyboardMonitor import KeyboardMonitor
+from KeyboardMonitor import KeyboardMonitor
 
 # Constants
 VERSION = "0.4.6"
@@ -1254,6 +1254,7 @@ class DAMXDaemon:
         self.manager = None
         self.server = None
         self.config = None
+        self.keyboard_monitor = None
 
     def load_config(self):
         """Load configuration from file"""
@@ -1264,7 +1265,10 @@ class DAMXDaemon:
             log.info(f"Creating default config at {CONFIG_PATH}")
             config['General'] = {
                 'LogLevel': 'INFO',
-                'AutoDetectFeatures': 'True'
+                'AutoDetectFeatures': 'True',
+                'NitroButtonEnabled': 'True',
+                'NitroButtonKeycode': '425',
+                'NitroButtonCommand': 'DAMX'
             }
 
             # Create config directory if it doesn't exist
@@ -1290,6 +1294,32 @@ class DAMXDaemon:
 
         return config
 
+    def setup_keyboard_monitor(self):
+        """Start monitoring the Nitro/PredatorSense hardware key if enabled."""
+        general_config = self.config['General'] if self.config and 'General' in self.config else {}
+        enabled = str(general_config.get('NitroButtonEnabled', 'True')).lower() in ('1', 'true', 'yes', 'on')
+        if not enabled:
+            log.info("Nitro/PredatorSense button monitoring disabled in config")
+            return
+
+        try:
+            keycode = int(general_config.get('NitroButtonKeycode', '425'))
+        except ValueError:
+            keycode = 425
+            log.warning("Invalid NitroButtonKeycode in config, using default keycode 425")
+
+        command = general_config.get('NitroButtonCommand', 'DAMX')
+        self.keyboard_monitor = KeyboardMonitor(
+            target_keycode=keycode,
+            command_to_run=command,
+            logger=log
+        )
+
+        if self.keyboard_monitor.start_monitoring():
+            log.info(f"Nitro/PredatorSense button monitoring started for keycode {keycode}")
+        else:
+            log.warning("Nitro/PredatorSense button monitoring could not be started")
+
     def setup(self):
         """Set up the daemon"""
         # Load configuration first
@@ -1298,18 +1328,7 @@ class DAMXDaemon:
         try:
             # Initialize DAMXManager
             self.manager = DAMXManager()
-
-            # Initialize keyboard monitor early
-            # self.keyboard_monitor = KeyboardMonitor(
-            #     target_keycode=425, 
-            #     command_to_run="DAMX",  # Updated command
-            #     logger=log
-            # )
-            # kb_success = self.keyboard_monitor.start_monitoring()
-            
-            # if not kb_success:
-            #     log.error("Failed to start keyboard monitoring")
-            #     # Don't return False here - continue with reduced functionality
+            self.setup_keyboard_monitor()
 
             # Initialize power monitor
             self.power_monitor = PowerSourceDetector(self.manager)
@@ -1337,13 +1356,6 @@ class DAMXDaemon:
         signal.signal(signal.SIGTERM, self.signal_handler)
         signal.signal(signal.SIGINT, self.signal_handler)
 
-        # if self.keyboard_monitor:
-        #     success = self.keyboard_monitor.start_monitoring()
-        #     if success:
-        #         log.info("Keyboard monitoring started successfully")
-        #     else:
-        #         log.warning("Failed to start keyboard monitoring")
-
         # Set up and run the server
         try:
             self.running = True
@@ -1367,9 +1379,9 @@ class DAMXDaemon:
             self.server.stop()
             self.server.cleanup_socket()  # Additional cleanup
             # Stop keyboard monitoring
-        # if hasattr(self, 'keyboard_monitor') and self.keyboard_monitor:
-        #     self.keyboard_monitor.stop_monitoring()
-        #     log.info("Keyboard monitoring stopped")
+        if hasattr(self, 'keyboard_monitor') and self.keyboard_monitor:
+            self.keyboard_monitor.stop_monitoring()
+            log.info("Keyboard monitoring stopped")
     
         if self.power_monitor:
             self.power_monitor.stop_monitoring()

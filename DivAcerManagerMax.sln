@@ -2,6 +2,8 @@
 Microsoft Visual Studio Solution File, Format Version 12.00
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DivAcerManagerMax", "DivAcerManagerMax\DivAcerManagerMax.csproj", "{65E38837-DBA8-4C80-B2DE-A87CE05993AB}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DivAcerManagerMax.Tests", "DivAcerManagerMax.Tests\DivAcerManagerMax.Tests.csproj", "{1DF606A7-B6D0-4B1B-A29A-9B3AAAB6F7BA}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -12,5 +14,9 @@ Global
 		{65E38837-DBA8-4C80-B2DE-A87CE05993AB}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{65E38837-DBA8-4C80-B2DE-A87CE05993AB}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{65E38837-DBA8-4C80-B2DE-A87CE05993AB}.Release|Any CPU.Build.0 = Release|Any CPU
+		{1DF606A7-B6D0-4B1B-A29A-9B3AAAB6F7BA}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{1DF606A7-B6D0-4B1B-A29A-9B3AAAB6F7BA}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{1DF606A7-B6D0-4B1B-A29A-9B3AAAB6F7BA}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{1DF606A7-B6D0-4B1B-A29A-9B3AAAB6F7BA}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal

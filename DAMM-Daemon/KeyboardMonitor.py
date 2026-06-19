@@ -10,6 +10,7 @@ import subprocess
 import threading
 import logging
 import time
+import pwd
 from pathlib import Path
 
 # Determine if we're on 64-bit system
@@ -21,6 +22,7 @@ EVENT_SIZE = 24 if IS_64BIT else 16
 EV_KEY = 1
 KEY_PRESS = 1
 TARGET_KEYCODE = 425
+ACER_WMI_DEVICE_NAME = "acer wmi hotkeys"
 
 class KeyboardMonitor:
     def __init__(self, target_keycode=TARGET_KEYCODE, command_to_run="/opt/damx/gui/DivAcerManagerMax", logger=None):
@@ -32,7 +34,7 @@ class KeyboardMonitor:
         self.log = logger or logging.getLogger("KeyboardMonitor")
         
     def find_keyboard_device(self):
-        """Find the keyboard input device"""
+        """Find the input device that emits the Nitro/PredatorSense key."""
         try:
             devices_path = Path("/proc/bus/input/devices")
             if not devices_path.exists():
@@ -43,6 +45,7 @@ class KeyboardMonitor:
                 content = f.read()
                 
             devices = content.split('\n\n')
+            fallback_device = None
             
             for device in devices:
                 lines = device.strip().split('\n')
@@ -50,11 +53,15 @@ class KeyboardMonitor:
                     continue
                     
                 is_keyboard = False
+                is_acer_wmi = False
                 event_num = None
                 
                 for line in lines:
                     line = line.strip()
-                    if 'keyboard' in line.lower():
+                    line_lower = line.lower()
+                    if ACER_WMI_DEVICE_NAME in line_lower:
+                        is_acer_wmi = True
+                    if 'keyboard' in line_lower:
                         is_keyboard = True
                     elif line.startswith('H:') and 'event' in line:
                         import re
@@ -62,11 +69,18 @@ class KeyboardMonitor:
                         if match:
                             event_num = match.group(1)
                 
-                if is_keyboard and event_num:
+                if event_num:
                     device_path = f"/dev/input/event{event_num}"
-                    if os.path.exists(device_path):
-                        self.log.info(f"Found keyboard device: {device_path}")
+                    if is_acer_wmi and os.path.exists(device_path):
+                        self.log.info(f"Found Acer WMI hotkeys device: {device_path}")
                         return device_path
+
+                    if is_keyboard and os.path.exists(device_path) and fallback_device is None:
+                        fallback_device = device_path
+
+            if fallback_device:
+                self.log.warning(f"Acer WMI hotkeys device not found, falling back to keyboard device: {fallback_device}")
+                return fallback_device
                         
         except Exception as e:
             self.log.error(f"Error finding keyboard device: {e}")
@@ -82,6 +96,9 @@ class KeyboardMonitor:
                 self.log.error("Could not determine user to run command")
                 return False
 
+            user_info = pwd.getpwnam(user)
+            runtime_dir = f"/run/user/{user_info.pw_uid}"
+
             # Get the user's environment
             env = os.environ.copy()
             
@@ -89,7 +106,7 @@ class KeyboardMonitor:
             env.update({
                 'DISPLAY': ':0',
                 'XAUTHORITY': f'/home/{user}/.Xauthority',
-                'DBUS_SESSION_BUS_ADDRESS': f'unix:path=/run/user/{os.getuid()}/bus'
+                'DBUS_SESSION_BUS_ADDRESS': f'unix:path={runtime_dir}/bus'
             })
 
             # Try running as the user with proper environment

@@ -1,16 +1,48 @@
+## #############################
+## Custom Project Build Outputs
+## #############################
 
-DivAcerManagerMax/obj/
+# Target build directories for main application
+**/bin/
+**/obj/
 
-DivAcerManagerMax/bin/Release/net9.0/linux-x64/
-
-DivAcerManagerMax/bin/Debug/net9.0/
-
-Publish/
-
-publish/
-
+# Custom publish and build deployment folders
+[Pp]ublish/
 buildPublish/
 
-DAMM-Daemon/build/
+# Daemon build and distribution outputs (Python/Node/C++)
+**/build/
+**/dist/
 
-DAMM-Daemon/dist/
+## #############################
+## IDE and System Files
+## #############################
+
+# JetBrains Rider / IntelliJ
+# .idea/
+# Unblocked since it appears to be used in the project... it might create colisions
+
+# Visual Studio
+.vs/
+*.user
+*.userosscache
+*.sln.docstates
+
+# VS Code
+.vscode/
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+## #############################
+## Environment & Secrets (Safety First)
+## #############################
+*.env
+*.env.local
+appsettings.Development.json
+DivAcerManagerMax.Tests/TestResults/
