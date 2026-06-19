@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RunSettings>
+  <DataCollectionRunSettings>
+    <DataCollectors>
+      <DataCollector friendlyName="XPlat Code Coverage">
+        <Configuration>
+          <Format>cobertura</Format>
+          <ExcludeByFile>
+            **/App.axaml,**/App.axaml.cs,**/DAMXClient.cs,**/Dashboard*.cs,**/Dashboard.axaml,**/FanCurveEditor.cs,**/FanProfiles.axaml,**/FanProfiles.axaml.cs,**/InternalsManager.axaml,**/InternalsManager.axaml.cs,**/MainWindow.axaml,**/MainWindow.axaml.cs,**/PowerSourceDetection.cs,**/Program.cs
+          </ExcludeByFile>
+        </Configuration>
+      </DataCollector>
+    </DataCollectors>
+  </DataCollectionRunSettings>
+</RunSettings>
