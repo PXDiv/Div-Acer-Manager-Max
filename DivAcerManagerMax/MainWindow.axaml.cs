@@ -44,6 +44,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private int _keyboardBrightness = 100;
     private Slider _keyBrightnessSlider;
     private TextBlock _keyBrightnessText;
+    private ComboBox _languageComboBox;
     private TextBlock _laptopTypeText;
     private CheckBox _lcdOverrideCheckBox;
     private RadioButton _leftToRightRadioButton;
@@ -162,10 +163,20 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         _driverVersionText = nameScope.Find<TextBlock>("DriverVersionText");
         _guiVersionTextBlock = nameScope.Find<TextBlock>("ProjectVersionText");
         _daemonErrorGrid = nameScope.Find<Grid>("DaemonErrorGrid");
+        _languageComboBox = nameScope.Find<ComboBox>("LanguageComboBox");
 
         // Set initial GUI version
         if (_guiVersionTextBlock != null)
             _guiVersionTextBlock.Text = $"v{ProjectVersion}";
+
+        ConfigureLanguageSelector();
+        LocalizationManager.Apply(this);
+        LocalizationManager.LanguageChanged += (_, _) =>
+        {
+            LocalizationManager.Apply(this);
+            if (_settings != null)
+                ApplySettingsToUI();
+        };
     }
 
     private void AttachEventHandlers()
@@ -213,6 +224,22 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         if (_backlightTimeoutCheckBox != null) _backlightTimeoutCheckBox.Click += BacklightTimeoutCheckBox_Click;
         if (_lcdOverrideCheckBox != null) _lcdOverrideCheckBox.Click += LcdOverrideCheckBox_Click;
         if (_bootAnimAndSoundCheckBox != null) _bootAnimAndSoundCheckBox.Click += BootSoundCheckBox_Click;
+    }
+
+    private void ConfigureLanguageSelector()
+    {
+        if (_languageComboBox == null)
+            return;
+
+        _languageComboBox.ItemsSource = LocalizationManager.SupportedLanguages;
+        _languageComboBox.SelectedItem = LocalizationManager.CurrentLanguage;
+        _languageComboBox.SelectionChanged += LanguageComboBox_OnSelectionChanged;
+    }
+
+    private void LanguageComboBox_OnSelectionChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        if (_languageComboBox.SelectedItem is SupportedLanguage language)
+            LocalizationManager.SetLanguage(language.Code);
     }
 
     private void UpdateUIElementVisibility()
@@ -327,14 +354,16 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             else
             {
                 await ShowMessageBox(
-                    "Error Connecting to Daemon",
-                    "Failed to connect to DAMX daemon. The Daemon may be initializing please wait.");
+                    LocalizationManager.T("Daemon.ConnectErrorTitle"),
+                    LocalizationManager.T("Daemon.ConnectErrorMessage"));
                 _daemonErrorGrid.IsVisible = true;
             }
         }
         catch (Exception ex)
         {
-            await ShowMessageBox("Error while initializing", $"Error initializing: {ex.Message}");
+            await ShowMessageBox(
+                LocalizationManager.T("Daemon.InitErrorTitle"),
+                LocalizationManager.Format("Daemon.InitErrorMessage", ex.Message));
             _daemonErrorGrid.IsVisible = true;
         }
     }
@@ -348,7 +377,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
         catch (Exception ex)
         {
-            await ShowMessageBox("Error while loading settings", $"Error loading settings: {ex.Message}");
+            await ShowMessageBox(
+                LocalizationManager.T("Settings.LoadErrorTitle"),
+                LocalizationManager.Format("Settings.LoadErrorMessage", ex.Message));
             _settings = new DAMXSettings();
             ApplySettingsToUI();
         }
@@ -365,21 +396,21 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 {
                     "low-power",
                     (_lowPowerProfileButton,
-                        "Prioritizes energy efficiency, reduces performance to extend battery life.", true, false)
+                        LocalizationManager.T("Power.LowPowerDescription"), true, false)
                 },
-                { "quiet", (_quietProfileButton, "Minimizes noise, prioritizes low power and cooling.", false, true) },
+                { "quiet", (_quietProfileButton, LocalizationManager.T("Power.QuietDescription"), false, true) },
                 {
                     "balanced",
-                    (_balancedProfileButton, "Optimal mix of performance and noise for everyday tasks.", true, true)
+                    (_balancedProfileButton, LocalizationManager.T("Power.BalancedDescription"), true, true)
                 },
                 {
                     "balanced-performance",
-                    (_performanceProfileButton, "Maximizes speed for demanding workloads, higher fan noise", false,
+                    (_performanceProfileButton, LocalizationManager.T("Power.PerformanceDescription"), false,
                         true)
                 },
                 {
                     "performance",
-                    (_turboProfileButton, "Unleashes peak power for extreme tasks, loudest fans.", false, true)
+                    (_turboProfileButton, LocalizationManager.T("Power.TurboDescription"), false, true)
                 }
             };
 
@@ -430,7 +461,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         if (_startCalibrationButton != null) _startCalibrationButton.IsEnabled = !isCalibrating;
         if (_stopCalibrationButton != null) _stopCalibrationButton.IsEnabled = isCalibrating;
         if (_calibrationStatusTextBlock != null)
-            _calibrationStatusTextBlock.Text = isCalibrating ? "Status: Calibrating" : "Status: Not calibrating";
+            _calibrationStatusTextBlock.Text = isCalibrating
+                ? LocalizationManager.T("Battery.StatusActive")
+                : LocalizationManager.T("Battery.StatusIdle");
 
         if (_bootAnimAndSoundCheckBox != null)
             _bootAnimAndSoundCheckBox.IsChecked =
