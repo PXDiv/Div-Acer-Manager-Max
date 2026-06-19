@@ -48,6 +48,9 @@
         <Compile Update="Dashboard.axaml.cs">
             <DependentUpon>Dashboard.axaml</DependentUpon>
         </Compile>
+        <Compile Update="FanProfiles.axaml.cs">
+            <DependentUpon>FanProfiles.axaml</DependentUpon>
+        </Compile>
         <Compile Update="InternalsManager.axaml.cs">
             <DependentUpon>InternalsManager.axaml</DependentUpon>
         </Compile>

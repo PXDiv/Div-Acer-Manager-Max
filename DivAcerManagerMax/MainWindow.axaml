@@ -56,6 +56,12 @@
 
                 </TabItem>
 
+                <TabItem Header="Fan Profiles" Tag="loc:Tabs.FanProfiles">
+
+                    <views:FanProfiles />
+
+                </TabItem>
+
                 <!-- Power & Performance Tab -->
                 <TabItem Header="Power &amp; Performance">
                     <ScrollViewer>
