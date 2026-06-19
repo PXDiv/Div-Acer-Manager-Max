@@ -13,10 +13,7 @@
     <configurations />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="946eaab8-0dd2-4963-b8be-4ed6ac03a9a6" name="Changes" comment="">
-      <change beforePath="$PROJECT_DIR$/.gitignore" beforeDir="false" afterPath="$PROJECT_DIR$/.gitignore" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/.idea.DivAcerManagerMax/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/.idea.DivAcerManagerMax/.idea/workspace.xml" afterDir="false" />
-    </list>
+    <list default="true" id="946eaab8-0dd2-4963-b8be-4ed6ac03a9a6" name="Changes" comment="" />
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
@@ -66,6 +63,65 @@
     <urls />
   </component>
   <component name="MetaFilesCheckinStateConfiguration" checkMetaFiles="true" />
+  <component name="NextEditCompletionFeaturesState">
+    <decayedCancelled>
+      <entry key="MS100" value="1.0000828206597578" />
+      <entry key="MS500" value="1.6537733478729928" />
+      <entry key="S2" value="5.4574207241746695" />
+      <entry key="S5" value="8.184036334473282" />
+      <entry key="S10" value="9.933531273639463" />
+      <entry key="S30" value="11.777979188426686" />
+      <entry key="S60" value="12.79227893345756" />
+      <entry key="M2" value="14.561401583345786" />
+      <entry key="M5" value="17.36396854694608" />
+      <entry key="M10" value="18.931915106363178" />
+      <entry key="M15" value="19.55846408894345" />
+      <entry key="M30" value="20.245791307602563" />
+      <entry key="H1" value="20.614130738851767" />
+      <entry key="H2" value="20.804821403346644" />
+      <entry key="H4" value="20.901842978993344" />
+      <entry key="D1" value="20.983561068226784" />
+      <entry key="W1" value="20.99764962841259" />
+    </decayedCancelled>
+    <decayedSelected>
+      <entry key="MS100" value="0.0" />
+      <entry key="MS500" value="0.0" />
+      <entry key="S2" value="0.0" />
+      <entry key="S5" value="0.0" />
+      <entry key="S10" value="0.0" />
+      <entry key="S30" value="0.0" />
+      <entry key="S60" value="0.0" />
+      <entry key="M2" value="0.0" />
+      <entry key="M5" value="0.0" />
+      <entry key="M10" value="0.0" />
+      <entry key="M15" value="0.0" />
+      <entry key="M30" value="0.0" />
+      <entry key="H1" value="0.0" />
+      <entry key="H2" value="0.0" />
+      <entry key="H4" value="0.0" />
+      <entry key="D1" value="0.0" />
+      <entry key="W1" value="0.0" />
+    </decayedSelected>
+    <decayedShown>
+      <entry key="MS100" value="0.986313037227392" />
+      <entry key="MS500" value="1.6464798852236753" />
+      <entry key="S2" value="5.448953366820768" />
+      <entry key="S5" value="8.178802923656825" />
+      <entry key="S10" value="9.930344252725156" />
+      <entry key="S30" value="11.776713432168618" />
+      <entry key="S60" value="12.791529288242955" />
+      <entry key="M2" value="14.560872071117112" />
+      <entry key="M5" value="17.36364944669989" />
+      <entry key="M10" value="18.931724866217767" />
+      <entry key="M15" value="19.558329040984134" />
+      <entry key="M30" value="20.245719263053044" />
+      <entry key="H1" value="20.614093503196383" />
+      <entry key="H2" value="20.804802471174057" />
+      <entry key="H4" value="20.901833432906983" />
+      <entry key="D1" value="20.983559465979408" />
+      <entry key="W1" value="20.99764939924341" />
+    </decayedShown>
+  </component>
   <component name="ProblemsViewState">
     <option name="selectedTabId" value="CurrentFile" />
   </component>
@@ -88,6 +144,7 @@
     "RunOnceActivity.MCP Project settings loaded": "true",
     "RunOnceActivity.ShowReadmeOnStart": "true",
     "RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager": "true",
+    "RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252": "true",
     "RunOnceActivity.cidr.known.project.marker": "true",
     "RunOnceActivity.git.unshallow": "true",
     "RunOnceActivity.readMode.enableVisualFormatting": "true",
@@ -248,7 +305,7 @@
       <workItem from="1751130197254" duration="2696000" />
       <workItem from="1751183647469" duration="3670000" />
       <workItem from="1781621407098" duration="1642000" />
-      <workItem from="1781849020420" duration="3168000" />
+      <workItem from="1781849020420" duration="3473000" />
     </task>
     <servers />
   </component>
