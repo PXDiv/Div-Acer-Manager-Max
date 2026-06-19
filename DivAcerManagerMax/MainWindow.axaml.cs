@@ -767,13 +767,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private async void ApplyKeyboardColorsButton_Click(object sender, RoutedEventArgs e)
     {
         if (_isConnected && _settings.HasFourZoneKb)
-            await _client.SetPerZoneModeAsync(
-                _zone1ColorPicker?.Color.ToString().Substring(3) ?? "#4287f5",
-                _zone2ColorPicker?.Color.ToString().Substring(3) ?? "#ff5733",
-                _zone3ColorPicker?.Color.ToString().Substring(3) ?? "#33ff57",
-                _zone4ColorPicker?.Color.ToString().Substring(3) ?? "#FFFF01",
-                _keyboardBrightness
-            );
+            await ApplyStaticKeyboardColorsAsync();
     }
 
     private void LightingSpeedSlider_ValueChanged(object sender, AvaloniaPropertyChangedEventArgs e)
@@ -791,19 +785,50 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         if ((_isConnected && _settings.HasFourZoneKb) || AppState.DevMode)
         {
             var mode = _lightingModeComboBox?.SelectedIndex ?? 0;
-            var direction = _leftToRightRadioButton?.IsChecked == true ? 1 : 2;
-            var color = _lightEffectColorPicker?.Color ?? Color.Parse(_effectColor);
+            if (RgbLightingMapper.IsStaticMode(mode))
+            {
+                await ApplyStaticKeyboardColorsAsync();
+                return;
+            }
 
-            await _client.SetFourZoneModeAsync(
-                mode,
-                _lightingSpeed,
-                _keyboardBrightness,
-                direction,
-                color.R,
-                color.G,
-                color.B
-            );
+            await ApplyDynamicKeyboardEffectAsync(mode);
         }
+    }
+
+    private async Task ApplyStaticKeyboardColorsAsync()
+    {
+        var request = RgbLightingMapper.CreateStaticRequest(
+            _zone1ColorPicker?.Color ?? Color.Parse("#4287f5"),
+            _zone2ColorPicker?.Color ?? Color.Parse("#ff5733"),
+            _zone3ColorPicker?.Color ?? Color.Parse("#33ff57"),
+            _zone4ColorPicker?.Color ?? Color.Parse("#ffff01"),
+            _keyboardBrightness);
+
+        await _client.SetPerZoneModeAsync(
+            request.Zone1,
+            request.Zone2,
+            request.Zone3,
+            request.Zone4,
+            request.Brightness);
+    }
+
+    private async Task ApplyDynamicKeyboardEffectAsync(int mode)
+    {
+        var request = RgbLightingMapper.CreateDynamicRequest(
+            mode,
+            _lightingSpeed,
+            _keyboardBrightness,
+            _leftToRightRadioButton?.IsChecked == true,
+            _lightEffectColorPicker?.Color ?? Color.Parse(_effectColor));
+
+        await _client.SetFourZoneModeAsync(
+            request.Mode,
+            request.Speed,
+            request.Brightness,
+            request.Direction,
+            request.Red,
+            request.Green,
+            request.Blue);
     }
 
     private async void BacklightTimeoutCheckBox_Click(object sender, RoutedEventArgs e)
