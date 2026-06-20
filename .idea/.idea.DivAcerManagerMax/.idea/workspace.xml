@@ -9,7 +9,10 @@
   <component name="ChangeListManager">
     <list default="true" id="946eaab8-0dd2-4963-b8be-4ed6ac03a9a6" name="Changes" comment="">
       <change beforePath="$PROJECT_DIR$/.idea/.idea.DivAcerManagerMax/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/.idea.DivAcerManagerMax/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/DivAcerManagerMax/MainWindow.axaml" beforeDir="false" afterPath="$PROJECT_DIR$/DivAcerManagerMax/MainWindow.axaml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/DAMM-Daemon/DAMX-Daemon.py" beforeDir="false" afterPath="$PROJECT_DIR$/DAMM-Daemon/DAMX-Daemon.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/DivAcerManagerMax/DAMXClient.cs" beforeDir="false" afterPath="$PROJECT_DIR$/DivAcerManagerMax/DAMXClient.cs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/DivAcerManagerMax/InternalsManager.axaml" beforeDir="false" afterPath="$PROJECT_DIR$/DivAcerManagerMax/InternalsManager.axaml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/DivAcerManagerMax/InternalsManager.axaml.cs" beforeDir="false" afterPath="$PROJECT_DIR$/DivAcerManagerMax/InternalsManager.axaml.cs" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/DivAcerManagerMax/MainWindow.axaml.cs" beforeDir="false" afterPath="$PROJECT_DIR$/DivAcerManagerMax/MainWindow.axaml.cs" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
@@ -57,8 +60,13 @@
     &quot;Python.DAMXDaemon_Op.executor&quot;: &quot;Run&quot;,
     &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
     &quot;RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.cidr.known.project.marker&quot;: &quot;true&quot;,
     &quot;RunOnceActivity.git.unshallow&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.readMode.enableVisualFormatting&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.typescript.service.memoryLimit.init&quot;: &quot;true&quot;,
     &quot;SHARE_PROJECT_CONFIGURATION_FILES&quot;: &quot;true&quot;,
+    &quot;cidr.known.project.marker&quot;: &quot;true&quot;,
+    &quot;codeWithMe.voiceChat.enabledByDefault&quot;: &quot;false&quot;,
     &quot;git-widget-placeholder&quot;: &quot;main&quot;,
     &quot;last_opened_file_path&quot;: &quot;/home/div/RiderProjects/Div-Acer-Manager-Max/publish&quot;,
     &quot;node.js.detected.package.eslint&quot;: &quot;true&quot;,
@@ -73,7 +81,11 @@
 }</component>
   <component name="RunManager" selected=".NET Project.DivAcerManagerMax">
     <configuration name="Publish" type="DotNetFolderPublish" factoryName="Publish to folder">
-      <riderPublish configuration="Release" delete_existing_files="true" include_all_content_for_self_extract="true" include_native_libs_for_self_extract="true" platform="Any CPU" produce_single_file="true" ready_to_run="true" runtime="linux-x64" self_contained="true" target_folder="$PROJECT_DIR$/publish" target_framework="net9.0" uuid_high="7341861591033859200" uuid_low="-5557819635835235413" />
+      <riderPublish configuration="Release" delete_existing_files="true" include_all_content_for_self_extract="true" include_native_libs_for_self_extract="true" platform="Any CPU" produce_single_file="true" ready_to_run="true" self_contained="true" target_folder="$PROJECT_DIR$/publish" target_framework="net9.0" uuid_high="7341861591033859200" uuid_low="-5557819635835235413">
+        <runtimes>
+          <item value="linux-x64" />
+        </runtimes>
+      </riderPublish>
       <method v="2" />
     </configuration>
     <configuration name="DivAcerManagerMax" type="DotNetProject" factoryName=".NET Project">
@@ -81,14 +93,12 @@
       <option name="PROGRAM_PARAMETERS" value="" />
       <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$/DivAcerManagerMax/bin/Debug/net9.0" />
       <option name="PASS_PARENT_ENVS" value="1" />
-      <option name="USE_EXTERNAL_CONSOLE" value="0" />
       <option name="ENV_FILE_PATHS" value="" />
       <option name="REDIRECT_INPUT_PATH" value="" />
-      <option name="PTY_MODE" value="Auto" />
+      <option name="MIXED_MODE_DEBUG" value="0" />
       <option name="USE_MONO" value="0" />
       <option name="RUNTIME_ARGUMENTS" value="" />
       <option name="AUTO_ATTACH_CHILDREN" value="0" />
-      <option name="MIXED_MODE_DEBUG" value="0" />
       <option name="PROJECT_PATH" value="$PROJECT_DIR$/DivAcerManagerMax/DivAcerManagerMax.csproj" />
       <option name="PROJECT_EXE_PATH_TRACKING" value="1" />
       <option name="PROJECT_ARGUMENTS_TRACKING" value="1" />
@@ -209,6 +219,8 @@
       <workItem from="1750922866382" duration="6128000" />
       <workItem from="1751130197254" duration="2696000" />
       <workItem from="1751183647469" duration="3670000" />
+      <workItem from="1781954892915" duration="11000" />
+      <workItem from="1781954951177" duration="5610000" />
     </task>
     <servers />
   </component>

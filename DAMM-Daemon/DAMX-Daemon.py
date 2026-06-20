@@ -22,7 +22,7 @@ from typing import Dict, List, Tuple, Set
 # from KeyboardMonitor import KeyboardMonitor
 
 # Constants
-VERSION = "0.4.6"
+VERSION = "0.4.9"
 SOCKET_PATH = "/var/run/DAMX.sock"
 LOG_PATH = "/var/log/DAMX_Daemon_Log.log"
 CONFIG_PATH = "/etc/DAMX_Daemon/config.ini"
@@ -151,14 +151,14 @@ class DAMXManager:
 
         try:
             # Remove the module
-            subprocess.run(['sudo', 'rmmod', 'linuwu-sense'], check=True)
+            subprocess.run(['sudo', 'rmmod', 'linuwu_sense'], check=True)
             log.info("Successfully removed linuwu-sense module")
             
             # Wait a moment
             time.sleep(2)
             
             # Reload the module
-            subprocess.run(['sudo', 'modprobe', 'linuwu-sense', 'nitro_v4'], check=True)
+            subprocess.run(['sudo', 'modprobe', 'linuwu_sense', 'nitro_v4'], check=True)
             log.info("Successfully reloaded linuwu-sense module")
             
             # Wait a moment for module to initialize
@@ -176,48 +176,48 @@ class DAMXManager:
         
 
     def _force_model_predator(self):
-        """Restart linuwu-sense driver and DAMX daemon service with nitro_v4 parameter"""
-        log.info("Forcing model detection to Nitro by restarting drivers and daemon")
+        """Restart linuwu-sense driver and DAMX daemon service with predator_v4 parameter"""
+        log.info("Forcing model detection to Predator by restarting drivers and daemon")
 
         try:
             # Remove the module
-            subprocess.run(['sudo', 'rmmod', 'linuwu-sense'], check=True)
+            subprocess.run(['sudo', 'rmmod', 'linuwu_sense'], check=True)
             log.info("Successfully removed linuwu-sense module")
             
             # Wait a moment
             time.sleep(2)
             
             # Reload the module
-            subprocess.run(['sudo', 'modprobe', 'linuwu-sense', 'predator_v4'], check=True)
+            subprocess.run(['sudo', 'modprobe', 'linuwu_sense', 'predator_v4'], check=True)
             log.info("Successfully reloaded linuwu-sense module")
-            
+
             # Wait a moment for module to initialize
             time.sleep(3)
-            
+
             # Restart the daemon service
             log.info("Restarting DAMX daemon service (may produce an error)")
             subprocess.run(['sudo', 'systemctl', 'restart', 'damx-daemon.service'], check=True)
-            
+
             return True
-        
+
         except Exception as e:
-            log.error(f"Unexpected error while Forcing Nitro Model: {e}")
+            log.error(f"Unexpected error while Forcing Predator Model: {e}")
             return False
-    
+
     def _force_enable_all(self):
         """Restart linuwu-sense driver and DAMX daemon service with enable_all parameter"""
         log.info("Forcing all features by restarting daemon and drivers with parameter enable_all")
 
         try:
             # Remove the module
-            subprocess.run(['sudo', 'rmmod', 'linuwu-sense'], check=True)
+            subprocess.run(['sudo', 'rmmod', 'linuwu_sense'], check=True)
             log.info("Successfully removed linuwu-sense module")
             
             # Wait a moment
             time.sleep(2)
             
             # Reload the module
-            subprocess.run(['sudo', 'modprobe', 'linuwu-sense', 'enable_all'], check=True)
+            subprocess.run(['sudo', 'modprobe', 'linuwu_sense', 'enable_all'], check=True)
             log.info("Successfully reloaded linuwu-sense module with enable_all parameter")
             
             # Wait a moment for module to initialize
@@ -258,10 +258,26 @@ class DAMXManager:
             # Write the config file
             with open(MODPROBE_CONFIG_PATH, 'w') as f:
                 f.write(f"options linuwu_sense {param}=1\n")
+                f.flush()
+                os.fsync(f.fileno())  # Force write to disk
             
-            log.info(f"Set modprobe parameter: {param}")
-            self.current_modprobe_param = param
-            return True
+            # Verify the write was successful
+            time.sleep(0.1)  # Small delay to ensure file system sync
+            if os.path.exists(MODPROBE_CONFIG_PATH):
+                with open(MODPROBE_CONFIG_PATH, 'r') as f:
+                    content = f.read().strip()
+                    expected = f"options linuwu_sense {param}=1"
+                    if expected in content:
+                        log.info(f"Successfully set modprobe parameter: {param}")
+                        self.current_modprobe_param = param
+                        return True
+                    else:
+                        log.error(f"Verification failed. Expected '{expected}', got '{content}'")
+                        return False
+            else:
+                log.error(f"Config file not found after write: {MODPROBE_CONFIG_PATH}")
+                return False
+                
         except Exception as e:
             log.error(f"Failed to set modprobe parameter: {e}")
             return False
@@ -271,9 +287,18 @@ class DAMXManager:
         try:
             if os.path.exists(MODPROBE_CONFIG_PATH):
                 os.unlink(MODPROBE_CONFIG_PATH)
-                log.info("Removed modprobe parameter config")
-            self.current_modprobe_param = ""
-            return True
+                # Verify removal
+                time.sleep(0.1)
+                if not os.path.exists(MODPROBE_CONFIG_PATH):
+                    log.info("Successfully removed modprobe parameter config")
+                    self.current_modprobe_param = ""
+                    return True
+                else:
+                    log.error("Failed to verify modprobe parameter removal")
+                    return False
+            else:
+                self.current_modprobe_param = ""
+                return True
         except Exception as e:
             log.error(f"Failed to remove modprobe parameter: {e}")
             return False
@@ -284,21 +309,56 @@ class DAMXManager:
 
     def set_modprobe_parameter(self, param: str) -> bool:
         """Set modprobe parameter and restart drivers"""
+        log.info(f"Attempting to set modprobe parameter: {param}")
+        log.info(f"Current parameter: {self.current_modprobe_param}")
+        log.info(f"Config path: {MODPROBE_CONFIG_PATH}")
+        
         if param not in ["nitro_v4", "predator_v4", "enable_all", ""]:
             log.error(f"Invalid modprobe parameter: {param}")
             return False
         
         if param == "":
             # Remove parameter
+            log.info("Removing modprobe parameter")
             if not self._remove_modprobe_parameter():
+                log.error("Failed to remove modprobe parameter")
                 return False
         else:
             # Set parameter
+            log.info(f"Setting modprobe parameter to: {param}")
             if not self._set_modprobe_parameter(param):
+                log.error(f"Failed to set modprobe parameter: {param}")
+                return False
+        
+        # Verify the change
+        if param != "":
+            if not self._verify_modprobe_parameter(param):
+                log.error(f"Verification failed for parameter: {param}")
                 return False
         
         # Restart drivers and daemon
+        log.info("Restarting drivers and daemon with new parameter")
         return self._restart_drivers_and_daemon()
+
+    def _verify_modprobe_parameter(self, param: str) -> bool:
+        """Verify that the modprobe parameter was written correctly"""
+        try:
+            if os.path.exists(MODPROBE_CONFIG_PATH):
+                with open(MODPROBE_CONFIG_PATH, 'r') as f:
+                    content = f.read().strip()
+                    expected = f"options linuwu_sense {param}=1"
+                    if expected in content:
+                        log.info(f"Verification successful for parameter: {param}")
+                        return True
+                    else:
+                        log.error(f"Verification failed. Expected '{expected}', got '{content}'")
+                        return False
+            else:
+                log.error(f"Config file does not exist: {MODPROBE_CONFIG_PATH}")
+                return False
+        except Exception as e:
+            log.error(f"Verification error: {e}")
+            return False
         
     def _restart_daemon(self):
         """Restart DAMX daemon service alone"""
@@ -324,14 +384,14 @@ class DAMXManager:
         
         try:
             # Remove the module
-            subprocess.run(['sudo', 'rmmod', 'linuwu-sense'], check=True)
+            subprocess.run(['sudo', 'rmmod', 'linuwu_sense'], check=True)
             log.info("Successfully removed linuwu-sense module")
             
             # Wait a moment
             time.sleep(2)
             
             # Reload the module
-            subprocess.run(['sudo', 'modprobe', 'linuwu-sense'], check=True)
+            subprocess.run(['sudo', 'modprobe', 'linuwu_sense'], check=True)
             log.info("Successfully reloaded linuwu-sense module")
             
             # Wait a moment for module to initialize
@@ -1170,39 +1230,58 @@ class DaemonServer:
                 }
 
             # Force Model and Parameters Permanantly
+            elif command == "set_modprobe_parameter_predator":
+                # Don't get parameter from params, use the specific value
+                success = self.manager.set_modprobe_parameter("predator_v4")
+                if success:
+                    return {
+                        "success": True,
+                        "data": {"parameter": "predator_v4"}
+                    }
+                else:
+                    return {
+                        "success": False,
+                        "error": "Failed to set modprobe parameter to predator_v4"
+                    }
+
             elif command == "set_modprobe_parameter_nitro":
                 success = self.manager.set_modprobe_parameter("nitro_v4")
-                return {
-                    "success": success,
-                    "data": {"parameter": param} if success else None,
-                    "error": "Failed to set modprobe parameter" if not success else None
-                }
-            
-            elif command == "set_modprobe_parameter_predator":
-                param = params.get("parameter", "")
-                success = self.manager.set_modprobe_parameter("predator_v4")
-                return {
-                    "success": success,
-                    "data": {"parameter": param} if success else None,
-                    "error": "Failed to set modprobe parameter" if not success else None
-                }
-            
+                if success:
+                    return {
+                        "success": True,
+                        "data": {"parameter": "nitro_v4"}
+                    }
+                else:
+                    return {
+                        "success": False,
+                        "error": "Failed to set modprobe parameter to nitro_v4"
+                    }
+
             elif command == "set_modprobe_parameter_enable_all":
-                param = params.get("parameter", "")
                 success = self.manager.set_modprobe_parameter("enable_all")
-                return {
-                    "success": success,
-                    "data": {"parameter": param} if success else None,
-                    "error": "Failed to set modprobe parameter" if not success else None
-                }
+                if success:
+                    return {
+                        "success": True,
+                        "data": {"parameter": "enable_all"}
+                    }
+                else:
+                    return {
+                        "success": False,
+                        "error": "Failed to set modprobe parameter to enable_all"
+                    }
 
             elif command == "remove_modprobe_parameter":
                 success = self.manager._remove_modprobe_parameter()
-                return {
-                    "success": success,
-                    "message": "Successfully removed modprobe parameter" if success else None,
-                    "error": "Failed to remove modprobe parameter" if not success else None
-                }
+                if success:
+                    return {
+                        "success": True,
+                        "message": "Successfully removed modprobe parameter"
+                    }
+                else:
+                    return {
+                        "success": False,
+                        "error": "Failed to remove modprobe parameter"
+                    }
             
             elif command == "restart_daemon":
                 # Force Nitro model into driver

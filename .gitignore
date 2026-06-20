@@ -14,3 +14,5 @@ buildPublish/
 DAMM-Daemon/build/
 
 DAMM-Daemon/dist/
+
+DAMM-Daemon/__pycache__/

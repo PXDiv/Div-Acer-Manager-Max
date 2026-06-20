@@ -5,6 +5,7 @@ using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace DivAcerManagerMax;
@@ -25,6 +26,7 @@ public class DAMXClient : IDisposable
     private const int MaxRetryAttempts = 3;
 
     private const int RetryDelayMs = 500;
+    private readonly SemaphoreSlim _commandLock = new(1, 1);
 
     // Cache of available features
     private HashSet<string> _availableFeatures = new();
@@ -149,15 +151,21 @@ public class DAMXClient : IDisposable
     public async Task<JsonDocument> SendCommandAsync(string command, Dictionary<string, object> parameters = null)
     {
         var attempt = 0;
+
         while (attempt < MaxRetryAttempts)
+        {
+            if (!IsConnected)
+            {
+                await ConnectAsync();
+
+                if (!IsConnected)
+                    throw new InvalidOperationException("Not connected to daemon");
+            }
+
+            await _commandLock.WaitAsync();
+
             try
             {
-                if (!IsConnected)
-                {
-                    await ConnectAsync();
-                    if (!IsConnected) throw new InvalidOperationException("Not connected to daemon");
-                }
-
                 var request = new
                 {
                     command,
@@ -167,42 +175,54 @@ public class DAMXClient : IDisposable
                 var requestJson = JsonSerializer.Serialize(request);
                 var requestBytes = Encoding.UTF8.GetBytes(requestJson);
 
-                // Send request
                 await _socket.SendAsync(requestBytes, SocketFlags.None);
 
-                // Receive response
                 var buffer = new byte[4096];
                 var received = await _socket.ReceiveAsync(buffer, SocketFlags.None);
 
-                if (received > 0)
+                if (received <= 0)
                 {
-                    var responseJson = Encoding.UTF8.GetString(buffer, 0, received);
-                    return JsonDocument.Parse(responseJson);
+                    ResetConnection();
+                    attempt++;
+                    await Task.Delay(RetryDelayMs);
+                    continue;
                 }
 
-                // If we got here, we received 0 bytes - connection was closed
-                IsConnected = false;
+                var responseJson = Encoding.UTF8.GetString(buffer, 0, received);
+                return JsonDocument.Parse(responseJson);
+            }
+            catch (SocketException ex) when (
+                ex.SocketErrorCode == SocketError.ConnectionReset ||
+                ex.SocketErrorCode == SocketError.Shutdown ||
+                ex.SocketErrorCode == SocketError.ConnectionAborted)
+            {
+                ResetConnection();
                 attempt++;
                 await Task.Delay(RetryDelayMs);
             }
-            catch (SocketException ex) when (ex.SocketErrorCode == SocketError.ConnectionReset ||
-                                             ex.SocketErrorCode == SocketError.Shutdown ||
-                                             ex.SocketErrorCode == SocketError.ConnectionAborted)
+            catch (JsonException ex)
             {
-                // Connection was reset - try to reconnect
-                IsConnected = false;
+                Console.WriteLine($"Invalid JSON response from daemon: {ex.Message}");
+
+                ResetConnection();
                 attempt++;
                 await Task.Delay(RetryDelayMs);
             }
             catch (Exception ex)
             {
                 Console.WriteLine($"Error communicating with daemon: {ex.Message}");
-                IsConnected = false;
+                ResetConnection();
                 throw;
             }
+            finally
+            {
+                _commandLock.Release();
+            }
+        }
 
         throw new IOException($"Failed to communicate with daemon after {MaxRetryAttempts} attempts");
     }
+
 
     /// <summary>
     ///     Get all settings from the DAMX-Daemon
@@ -483,6 +503,29 @@ public class DAMXClient : IDisposable
         }
 
         _disposed = true;
+    }
+
+    private void ResetConnection()
+    {
+        IsConnected = false;
+
+        try
+        {
+            _socket?.Shutdown(SocketShutdown.Both);
+        }
+        catch
+        {
+            // Socket may already be closed.
+        }
+
+        try
+        {
+            _socket?.Dispose();
+        }
+        catch
+        {
+            // Ignore cleanup failure.
+        }
     }
 }
 
