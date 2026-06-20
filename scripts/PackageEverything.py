@@ -24,12 +24,14 @@ class DAMXBuilder:
         self.gui_dir = self.base_dir / "Div-Acer-Manager-Max" / "DivAcerManagerMax"
         self.drivers_dir = self.base_dir / "Div-Linuwu-Sense"
         self.publish_dir = self.base_dir / "Publish"
-        self.setup_script = self.base_dir / "Setup.sh"
-        
+        self.setup_script = self.base_dir / "Div-Acer-Manager-Max/scripts/local-setup.sh"
+        # self.setup_signed_script = self.base_dir / "Div-Acer-Manager-Max/Scripts/build_sign_install.sh"
+
+
         # Icon files to copy
         self.icon_files = [
             self.gui_dir / "icon.png",
-            Path("/home/div/Projects/Div-Acer-Manager-Max/DivAcerManagerMax/iconTransparent.png")
+            Path( self.base_dir  / "Div-Acer-Manager-Max/DivAcerManagerMax/iconTransparent.png")
         ]
         
         print(f"Script location: {script_path}")
@@ -88,7 +90,7 @@ class DAMXBuilder:
                 content = f.read()
                 
             # Match: private readonly string ProjectVersion = "0.8.8";
-            match = re.search(r'private readonly string ProjectVersion\s*=\s*"([\d.]+)"', content)
+            match = re.search(r'private const string ProjectVersion\s*=\s*"([\d.]+)"', content)
             if match:
                 return match.group(1)
                 
@@ -350,6 +352,9 @@ class DAMXBuilder:
         
         setup_target = package_dir / "setup.sh"
         shutil.copy2(self.setup_script, setup_target)
+        # setup_signed_target = package_dir / "build_sign_install.sh"
+        # shutil.copy2(self.setup_signed_script, setup_signed_target)
+
         
         # Read the setup script content
         with open(setup_target, 'r') as f:
