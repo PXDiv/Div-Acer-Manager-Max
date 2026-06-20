@@ -223,6 +223,7 @@ public class DAMXClient : IDisposable
         throw new IOException($"Failed to communicate with daemon after {MaxRetryAttempts} attempts");
     }
 
+
     /// <summary>
     ///     Get all settings from the DAMX-Daemon
     /// </summary>

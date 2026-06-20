@@ -83,6 +83,7 @@
 
                             <ComboBox x:Name="ForceParameterPermanentlyComboBox"
                                       SelectedIndex="0"
+                                      SelectionChanged="ForceParameterPermanently_OnSelectionChanged"
                                       HorizontalAlignment="Left"
                                       MinWidth="280">
                                 <ComboBoxItem Content="Disabled" />

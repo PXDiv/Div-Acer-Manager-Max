@@ -16,7 +16,7 @@ namespace DivAcerManagerMax;
 
 public partial class MainWindow : Window, INotifyPropertyChanged
 {
-    private const string ProjectVersion = "1.0.0";
+    private const string ProjectVersion = "1.0.1";
     private const string DefaultEffectColor = "#0078D7";
     private const string DefaultZone1Color = "#4287f5";
     private const string DefaultZone2Color = "#ff5733";
