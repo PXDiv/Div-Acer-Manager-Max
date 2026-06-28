@@ -217,6 +217,8 @@ static struct quirk_entry quirk_acer_predator_phn16_73 = {
 3. For RGB keyboard issues:
    - Ensure `four_zone_kb = 1` is set
    - Check if your keyboard responds to the existing RGB controls
+   - Some Predator models (e.g. **PH315-54**) do not expose `four_zoned_kb` until `enable_all=1` is set in `/etc/modprobe.d/linuwu-sense.conf`. DAMX-Daemon can apply this automatically on startup when RGB sysfs is missing.
+   - On recent kernels the RGB sysfs path may be `/sys/devices/platform/acer-wmi/four_zoned_kb/` instead of the module-linked path
 
 Remember to always keep a backup of your working kernel/driver before making changes!
 

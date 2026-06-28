@@ -28,6 +28,10 @@ LOG_PATH = "/var/log/DAMX_Daemon_Log.log"
 CONFIG_PATH = "/etc/DAMX_Daemon/config.ini"
 PID_FILE = "/var/run/DAMX-Daemon.pid"
 MODPROBE_CONFIG_PATH = "/etc/modprobe.d/linuwu-sense.conf"
+SYSFS_ACER_PREFIXES = [
+    "/sys/devices/platform/acer-wmi",
+    "/sys/module/linuwu_sense/drivers/platform:acer-wmi/acer-wmi",
+]
 
 # Check if running as root
 if os.geteuid() != 0:
@@ -98,9 +102,15 @@ class DAMXManager:
             # Reset counter on successful detection
             self._reset_restart_attempts()
         
-        self.base_path = self._get_base_path()
-        self.has_four_zone_kb = self._check_four_zone_kb()
         self.current_modprobe_param = self._detect_current_modprobe_param()
+        self.base_path = self._get_base_path()
+
+        if os.path.exists("/sys/module/linuwu_sense"):
+            if self._ensure_rgb_sysfs():
+                self.laptop_type = self._detect_laptop_type()
+                self.base_path = self._get_base_path()
+
+        self.has_four_zone_kb = self._check_four_zone_kb()
 
         # Available features set
         self.available_features = self._detect_available_features()
@@ -114,7 +124,9 @@ class DAMXManager:
         if not os.path.exists(self.base_path) and self.laptop_type != LaptopType.UNKNOWN:
             log.error(f"Base path does not exist: {self.base_path}")
             raise FileNotFoundError(f"Base path does not exist: {self.base_path}")
-        
+
+        self._restore_keyboard_rgb()
+
         self.power_monitor = None
 
     def _get_restart_attempts(self) -> int:
@@ -407,14 +419,123 @@ class DAMXManager:
             log.error(f"Unexpected error during restart (attempt {attempts}): {e}")
             return False
             
+    def _resolve_sysfs_subdir(self, subdir: str) -> str:
+        """Return the first existing sysfs path for an acer-wmi subdirectory."""
+        for prefix in SYSFS_ACER_PREFIXES:
+            path = os.path.join(prefix, subdir)
+            if os.path.exists(path):
+                return path
+        return ""
+
+    def _get_kb_base_path(self) -> str:
+        """Get the sysfs base path for four-zone keyboard RGB."""
+        return self._resolve_sysfs_subdir("four_zoned_kb")
+
+    def _ensure_rgb_sysfs(self) -> bool:
+        """Ensure four_zoned_kb sysfs exists, loading enable_all if needed."""
+        if self._get_kb_base_path():
+            return False
+
+        if self.current_modprobe_param == "enable_all":
+            return False
+
+        log.info("four_zoned_kb not found, attempting to enable RGB with enable_all parameter")
+
+        if not self._set_modprobe_parameter("enable_all"):
+            log.error("Failed to set enable_all modprobe parameter for RGB")
+            return False
+
+        try:
+            subprocess.run(['rmmod', 'linuwu_sense'], check=True)
+            time.sleep(2)
+            subprocess.run(['modprobe', 'linuwu_sense'], check=True)
+            time.sleep(3)
+            self.current_modprobe_param = "enable_all"
+        except Exception as e:
+            log.error(f"Failed to reload linuwu_sense with enable_all: {e}")
+            return False
+
+        kb_path = self._get_kb_base_path()
+        if kb_path:
+            log.info(f"four_zoned_kb now available at {kb_path}")
+            return True
+
+        log.warning("four_zoned_kb still not available after enable_all")
+        return False
+
+    def _load_keyboard_rgb_config(self) -> Dict:
+        """Load keyboard RGB settings from daemon config."""
+        config = configparser.ConfigParser()
+        if not os.path.exists(CONFIG_PATH):
+            return {}
+
+        config.read(CONFIG_PATH)
+        if 'KeyboardRgb' not in config:
+            return {}
+
+        return dict(config['KeyboardRgb'])
+
+    def _save_keyboard_rgb_config(self, **kwargs) -> bool:
+        """Save keyboard RGB settings to daemon config."""
+        try:
+            config = configparser.ConfigParser()
+            if os.path.exists(CONFIG_PATH):
+                config.read(CONFIG_PATH)
+
+            if 'KeyboardRgb' not in config:
+                config['KeyboardRgb'] = {}
+
+            for key, value in kwargs.items():
+                config['KeyboardRgb'][key] = str(value)
+
+            os.makedirs(os.path.dirname(CONFIG_PATH), exist_ok=True)
+            with open(CONFIG_PATH, 'w') as f:
+                config.write(f)
+            return True
+        except Exception as e:
+            log.error(f"Failed to save keyboard RGB config: {e}")
+            return False
+
+    def _restore_keyboard_rgb(self):
+        """Restore saved keyboard RGB settings on daemon startup."""
+        if not self.has_four_zone_kb:
+            return
+
+        cfg = self._load_keyboard_rgb_config()
+        if not cfg:
+            return
+
+        profile = cfg.get('active_profile', '')
+        kb_base = self._get_kb_base_path()
+        if not kb_base:
+            return
+
+        if profile == 'zones':
+            zone1 = cfg.get('zone1', '000000')
+            zone2 = cfg.get('zone2', '000000')
+            zone3 = cfg.get('zone3', '000000')
+            zone4 = cfg.get('zone4', '000000')
+            brightness = cfg.get('brightness', '100')
+            value = f"{zone1},{zone2},{zone3},{zone4},{brightness}\n"
+            if self._write_file(os.path.join(kb_base, "per_zone_mode"), value):
+                log.info("Restored per-zone keyboard RGB from config")
+        elif profile == 'effect':
+            mode = cfg.get('effect_mode', '0')
+            speed = cfg.get('effect_speed', '5')
+            brightness = cfg.get('brightness', '100')
+            direction = cfg.get('effect_direction', '1')
+            red = cfg.get('effect_red', '0')
+            green = cfg.get('effect_green', '0')
+            blue = cfg.get('effect_blue', '0')
+            value = f"{mode},{speed},{brightness},{direction},{red},{green},{blue}\n"
+            if self._write_file(os.path.join(kb_base, "four_zone_mode"), value):
+                log.info("Restored four-zone keyboard effect from config")
+
     def _detect_laptop_type(self) -> LaptopType:
         """Detect whether this is a Predator or Nitro laptop"""
-        predator_path = "/sys/module/linuwu_sense/drivers/platform:acer-wmi/acer-wmi/predator_sense"
-        nitro_path = "/sys/module/linuwu_sense/drivers/platform:acer-wmi/acer-wmi/nitro_sense"
-
-        if os.path.exists(predator_path):
+        if self._resolve_sysfs_subdir("predator_sense"):
             return LaptopType.PREDATOR
-        elif os.path.exists(nitro_path):
+        elif self._resolve_sysfs_subdir("nitro_sense"):
             return LaptopType.NITRO
         else:
             return LaptopType.UNKNOWN
@@ -422,9 +543,9 @@ class DAMXManager:
     def _get_base_path(self) -> str:
         """Get the base path for VFS access based on laptop type"""
         if self.laptop_type == LaptopType.PREDATOR:
-            return "/sys/module/linuwu_sense/drivers/platform:acer-wmi/acer-wmi/predator_sense"
+            return self._resolve_sysfs_subdir("predator_sense")
         elif self.laptop_type == LaptopType.NITRO:
-            return "/sys/module/linuwu_sense/drivers/platform:acer-wmi/acer-wmi/nitro_sense"
+            return self._resolve_sysfs_subdir("nitro_sense")
         else:
             return ""
 
@@ -468,7 +589,7 @@ class DAMXManager:
 
         # Check keyboard features
         if self.has_four_zone_kb:
-            kb_base = "/sys/module/linuwu_sense/drivers/platform:acer-wmi/acer-wmi/four_zoned_kb"
+            kb_base = self._get_kb_base_path()
             if os.path.exists(os.path.join(kb_base, "per_zone_mode")):
                 available.add("per_zone_mode")
             if os.path.exists(os.path.join(kb_base, "four_zone_mode")):
@@ -478,10 +599,7 @@ class DAMXManager:
 
     def _check_four_zone_kb(self) -> bool:
         """Check if four-zone keyboard is available"""
-        if self.laptop_type != LaptopType.UNKNOWN:
-            kb_path = "/sys/module/linuwu_sense/drivers/platform:acer-wmi/acer-wmi/four_zoned_kb"
-            return os.path.exists(kb_path)
-        return False
+        return bool(self._get_kb_base_path())
 
     def _read_file(self, path: str) -> str:
         """Read from a VFS file"""
@@ -675,7 +793,10 @@ class DAMXManager:
         if "per_zone_mode" not in self.available_features:
             return ""
 
-        return self._read_file("/sys/module/linuwu_sense/drivers/platform:acer-wmi/acer-wmi/four_zoned_kb/per_zone_mode")
+        kb_base = self._get_kb_base_path()
+        if not kb_base:
+            return ""
+        return self._read_file(os.path.join(kb_base, "per_zone_mode"))
 
     def set_per_zone_mode(self, zone1: str, zone2: str, zone3: str, zone4: str, brightness: int) -> bool:
         """Set per-zone mode configuration
@@ -704,18 +825,33 @@ class DAMXManager:
             log.error(f"Invalid brightness. Must be between 0 and 100: {brightness}")
             return False
 
+        kb_base = self._get_kb_base_path()
+        if not kb_base:
+            return False
+
         value = f"{zone1},{zone2},{zone3},{zone4},{brightness}\n"
-        return self._write_file(
-            "/sys/module/linuwu_sense/drivers/platform:acer-wmi/acer-wmi/four_zoned_kb/per_zone_mode",
-            value
+        if not self._write_file(os.path.join(kb_base, "per_zone_mode"), value):
+            return False
+
+        self._save_keyboard_rgb_config(
+            active_profile='zones',
+            zone1=zone1,
+            zone2=zone2,
+            zone3=zone3,
+            zone4=zone4,
+            brightness=brightness
         )
+        return True
 
     def get_four_zone_mode(self) -> str:
         """Get four-zone mode configuration"""
         if "four_zone_mode" not in self.available_features:
             return ""
 
-        return self._read_file("/sys/module/linuwu_sense/drivers/platform:acer-wmi/acer-wmi/four_zoned_kb/four_zone_mode")
+        kb_base = self._get_kb_base_path()
+        if not kb_base:
+            return ""
+        return self._read_file(os.path.join(kb_base, "four_zone_mode"))
 
     def set_four_zone_mode(self, mode: int, speed: int, brightness: int,
                            direction: int, red: int, green: int, blue: int) -> bool:
@@ -752,11 +888,25 @@ class DAMXManager:
             log.error(f"Invalid RGB values. Must be between 0 and 255: {red},{green},{blue}")
             return False
 
+        kb_base = self._get_kb_base_path()
+        if not kb_base:
+            return False
+
         value = f"{mode},{speed},{brightness},{direction},{red},{green},{blue}\n"
-        return self._write_file(
-            "/sys/module/linuwu_sense/drivers/platform:acer-wmi/acer-wmi/four_zoned_kb/four_zone_mode",
-            value
+        if not self._write_file(os.path.join(kb_base, "four_zone_mode"), value):
+            return False
+
+        self._save_keyboard_rgb_config(
+            active_profile='effect',
+            effect_mode=mode,
+            effect_speed=speed,
+            brightness=brightness,
+            effect_direction=direction,
+            effect_red=red,
+            effect_green=green,
+            effect_blue=blue
         )
+        return True
 
     def get_all_settings(self) -> Dict:
         """Get all DAMX-Daemon settings as a dictionary"""
@@ -1176,7 +1326,7 @@ class DaemonServer:
                         "version": VERSION
                     }
                 }
-            
+
             # Force Models and Features
             elif command == "force_nitro_model":
                 # Force Nitro model into driver
