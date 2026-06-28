@@ -63,8 +63,7 @@ public class DAMXClient : IDisposable
 
         try
         {
-            // Send a simple ping command to verify connection
-            var response = await SendCommandAsync("ping");
+            var response = await SendCommandAsync("get_version");
             return response.RootElement.GetProperty("success").GetBoolean();
         }
         catch

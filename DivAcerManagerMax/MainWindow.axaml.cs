@@ -27,6 +27,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private const string AppDataFolderName = "DivAcerManagerMax";
     private const string KeyboardZonePresetFileName = "keyboard-zone-colors.conf";
     private const string KeyboardLightingEffectPresetFileName = "keyboard-lighting-effect.conf";
+    private const string KeyboardActiveProfileFileName = "keyboard-active-profile.conf";
+    private const string KeyboardProfileZones = "zones";
+    private const string KeyboardProfileEffect = "effect";
 
     private static readonly string AppDataFolderPath =
         Path.Combine(
@@ -40,8 +43,12 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private static readonly string KeyboardLightingEffectPresetPath =
         Path.Combine(AppDataFolderPath, KeyboardLightingEffectPresetFileName);
 
+    private static readonly string KeyboardActiveProfilePath =
+        Path.Combine(AppDataFolderPath, KeyboardActiveProfileFileName);
+
     // UI Controls (will be bound via NameScope)
     private Button _applyKeyboardColorsButton;
+    private Button _applySameColorAllZonesButton;
     private RadioButton _autoFanSpeedRadioButton;
     private CheckBox _backlightTimeoutCheckBox;
     private RadioButton _balancedProfileButton;
@@ -162,6 +169,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         _keyBrightnessSlider = nameScope.Find<Slider>("KeyBrightnessSlider");
         _keyBrightnessText = nameScope.Find<TextBlock>("KeyBrightnessText");
         _applyKeyboardColorsButton = nameScope.Find<Button>("ApplyKeyboardColorsButton");
+        _applySameColorAllZonesButton = nameScope.Find<Button>("ApplySameColorAllZonesButton");
 
         // Lighting effects controls
         _lightingModeComboBox = nameScope.Find<ComboBox>("LightingModeComboBox");
@@ -228,6 +236,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         // Keyboard lighting handlers
         if (_keyBrightnessSlider != null) _keyBrightnessSlider.PropertyChanged += KeyboardBrightnessSlider_ValueChanged;
         if (_applyKeyboardColorsButton != null) _applyKeyboardColorsButton.Click += ApplyKeyboardColorsButton_Click;
+        if (_applySameColorAllZonesButton != null)
+            _applySameColorAllZonesButton.Click += ApplySameColorAllZonesButton_Click;
 
         // Lighting effects handlers
         if (_lightingSpeedSlider != null) _lightingSpeedSlider.PropertyChanged += LightingSpeedSlider_ValueChanged;
@@ -369,12 +379,40 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         {
             _settings = await _client.GetAllSettingsAsync() ?? new DAMXSettings();
             ApplySettingsToUI();
+            await RestoreKeyboardPresetsAsync();
         }
         catch (Exception ex)
         {
             await ShowMessageBox("Error while loading settings", $"Error loading settings: {ex.Message}");
             _settings = new DAMXSettings();
             ApplySettingsToUI();
+        }
+    }
+
+    private async Task RestoreKeyboardPresetsAsync()
+    {
+        if (!_isConnected || !_settings.HasFourZoneKb)
+            return;
+
+        try
+        {
+            var activeProfile = GetKeyboardActiveProfile();
+            if (activeProfile == KeyboardProfileEffect)
+            {
+                if (!await ApplyLightingEffectPresetToHardwareAsync())
+                    await ShowMessageBox("Keyboard Lighting", "Failed to restore saved lighting effect.");
+                return;
+            }
+
+            if (activeProfile == KeyboardProfileZones)
+            {
+                if (!await ApplyZonePresetToHardwareAsync())
+                    await ShowMessageBox("Keyboard Lighting", "Failed to restore saved zone colors.");
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Failed to restore keyboard presets: {ex.Message}");
         }
     }
 
@@ -583,13 +621,26 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         if (!_settings.HasFourZoneKb)
             return;
 
+        var activeProfile = GetKeyboardActiveProfile();
+
+        if (activeProfile == KeyboardProfileEffect)
+        {
+            ApplySavedLightingEffectPresetToUI();
+            if (!File.Exists(KeyboardLightingEffectPresetPath))
+                ApplyFourZoneSettingsToUI();
+            ApplySavedZonePresetToUI();
+            return;
+        }
+
         ApplySavedZonePresetToUI();
 
         if (!HasSavedZonePreset())
             ApplyPerZoneSettingsToUI();
 
-        ApplyFourZoneSettingsToUI();
         ApplySavedLightingEffectPresetToUI();
+
+        if (!File.Exists(KeyboardLightingEffectPresetPath))
+            ApplyFourZoneSettingsToUI();
     }
 
     private void ApplyPerZoneSettingsToUI()
@@ -632,7 +683,6 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
         SetDirectionRadioButtons(direction);
 
-        // Mode 2 / Neon often reports 0,0,0. Do not overwrite the color picker with black for that.
         if (mode != 2 || red != 0 || green != 0 || blue != 0)
             SetColorPicker(_lightEffectColorPicker, $"{red:X2}{green:X2}{blue:X2}");
     }
@@ -859,23 +909,80 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private void KeyboardBrightnessSlider_ValueChanged(object sender, AvaloniaPropertyChangedEventArgs e)
     {
         if (e.Property == Slider.ValueProperty)
-            SetKeyboardBrightness(Convert.ToInt32(e.NewValue), false);
+            SetKeyboardBrightness(GetHardwareKeyboardBrightness(), false);
+    }
+
+    private int GetHardwareKeyboardBrightness()
+    {
+        var value = _keyBrightnessSlider?.Value ?? _keyboardBrightness;
+        return (int)Math.Clamp(Math.Round(value, MidpointRounding.AwayFromZero), 0, 100);
+    }
+
+    private async Task<bool> ApplyLightingEffectToHardwareAsync(int mode, int speed, int brightness, int direction,
+        Color color)
+    {
+        if (mode == 0)
+        {
+            var rgb = ToRgbHex(color);
+            return await _client.SetPerZoneModeAsync(rgb, rgb, rgb, rgb, brightness);
+        }
+
+        return await _client.SetFourZoneModeAsync(
+            mode,
+            speed,
+            brightness,
+            direction,
+            color.R,
+            color.G,
+            color.B
+        );
+    }
+
+    private void CopyZone1ColorToOtherZones()
+    {
+        var color = _zone1ColorPicker?.Color ?? Color.Parse(DefaultZone1Color);
+
+        if (_zone2ColorPicker != null) _zone2ColorPicker.Color = color;
+        if (_zone3ColorPicker != null) _zone3ColorPicker.Color = color;
+        if (_zone4ColorPicker != null) _zone4ColorPicker.Color = color;
+    }
+
+    private async Task<bool> ApplyZoneColorsFromUIAsync()
+    {
+        if (!_isConnected || !_settings.HasFourZoneKb)
+            return false;
+
+        return await _client.SetPerZoneModeAsync(
+            ToRgbHex(_zone1ColorPicker?.Color ?? Color.Parse(DefaultZone1Color)),
+            ToRgbHex(_zone2ColorPicker?.Color ?? Color.Parse(DefaultZone2Color)),
+            ToRgbHex(_zone3ColorPicker?.Color ?? Color.Parse(DefaultZone3Color)),
+            ToRgbHex(_zone4ColorPicker?.Color ?? Color.Parse(DefaultZone4Color)),
+            GetHardwareKeyboardBrightness()
+        );
+    }
+
+    private async Task SaveZoneColorsFromUIAsync()
+    {
+        if (!await ApplyZoneColorsFromUIAsync())
+        {
+            if (_isConnected && _settings.HasFourZoneKb)
+                await ShowMessageBox("Keyboard Lighting", "Failed to apply zone colors.");
+
+            return;
+        }
+
+        SaveZonePresetFromUI();
+    }
+
+    private async void ApplySameColorAllZonesButton_Click(object sender, RoutedEventArgs e)
+    {
+        CopyZone1ColorToOtherZones();
+        await SaveZoneColorsFromUIAsync();
     }
 
     private async void ApplyKeyboardColorsButton_Click(object sender, RoutedEventArgs e)
     {
-        if (_isConnected && _settings.HasFourZoneKb)
-        {
-            await _client.SetPerZoneModeAsync(
-                ToRgbHex(_zone1ColorPicker?.Color ?? Color.Parse(DefaultZone1Color)),
-                ToRgbHex(_zone2ColorPicker?.Color ?? Color.Parse(DefaultZone2Color)),
-                ToRgbHex(_zone3ColorPicker?.Color ?? Color.Parse(DefaultZone3Color)),
-                ToRgbHex(_zone4ColorPicker?.Color ?? Color.Parse(DefaultZone4Color)),
-                _keyboardBrightness
-            );
-
-            SaveZonePresetFromUI();
-        }
+        await SaveZoneColorsFromUIAsync();
     }
 
     private void LightingSpeedSlider_ValueChanged(object sender, AvaloniaPropertyChangedEventArgs e)
@@ -889,37 +996,28 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         if ((_isConnected && _settings.HasFourZoneKb) || AppState.DevMode)
         {
             var mode = _lightingModeComboBox?.SelectedIndex ?? 0;
-
             var direction = GetSelectedDirection();
-
             var color = _lightEffectColorPicker?.Color ?? Color.Parse(DefaultEffectColor);
+            var brightness = GetHardwareKeyboardBrightness();
 
-            if (mode == 0)
-            {
-                var rgb = ToRgbHex(color);
-
-                await _client.SetPerZoneModeAsync(
-                    rgb,
-                    rgb,
-                    rgb,
-                    rgb,
-                    _keyboardBrightness
-                );
-
-                SaveLightingEffectPresetFromUI(mode, direction, color);
-
-                return;
-            }
-
-            await _client.SetFourZoneModeAsync(
+            var success = await ApplyLightingEffectToHardwareAsync(
                 mode,
                 _lightingSpeed,
-                _keyboardBrightness,
+                brightness,
                 direction,
-                color.R,
-                color.G,
-                color.B
+                color
             );
+
+            if (!success)
+            {
+                await ShowMessageBox(
+                    "Keyboard Lighting",
+                    mode == 0
+                        ? "Failed to apply static lighting effect."
+                        : "Failed to apply lighting effect."
+                );
+                return;
+            }
 
             SaveLightingEffectPresetFromUI(mode, direction, color);
         }
@@ -960,12 +1058,12 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private void SetKeyboardBrightness(int brightness, bool updateSlider = true)
     {
-        _keyboardBrightness = brightness;
+        _keyboardBrightness = (int)Math.Clamp(brightness, 0, 100);
 
         if (updateSlider && _keyBrightnessSlider != null)
-            _keyBrightnessSlider.Value = brightness;
+            _keyBrightnessSlider.Value = _keyboardBrightness;
 
-        SetText(_keyBrightnessText, $"{brightness}%");
+        SetText(_keyBrightnessText, $"{_keyboardBrightness}%");
     }
 
     private void SetLightingSpeed(int speed, bool updateSlider = true)
@@ -1143,6 +1241,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         try
         {
             WritePresetFile(KeyboardZonePresetPath, CreateZonePresetValueFromUI());
+            SaveKeyboardActiveProfile(KeyboardProfileZones);
         }
         catch
         {
@@ -1157,7 +1256,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         var zone3 = ToRgbHex(_zone3ColorPicker?.Color ?? Color.Parse(DefaultZone3Color));
         var zone4 = ToRgbHex(_zone4ColorPicker?.Color ?? Color.Parse(DefaultZone4Color));
 
-        return $"{zone1},{zone2},{zone3},{zone4},{_keyboardBrightness}";
+        return $"{zone1},{zone2},{zone3},{zone4},{GetHardwareKeyboardBrightness()}";
     }
 
     private void ApplySavedLightingEffectPresetToUI()
@@ -1187,7 +1286,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             SetKeyboardBrightness(brightness);
             SetDirectionRadioButtons(direction);
 
-            SetColorPicker(_lightEffectColorPicker, $"{red:X2}{green:X2}{blue:X2}");
+            if (mode != 2 || red != 0 || green != 0 || blue != 0)
+                SetColorPicker(_lightEffectColorPicker, $"{red:X2}{green:X2}{blue:X2}");
         }
         catch
         {
@@ -1201,13 +1301,100 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         {
             WritePresetFile(
                 KeyboardLightingEffectPresetPath,
-                $"{mode},{_lightingSpeed},{_keyboardBrightness},{direction},{color.R},{color.G},{color.B}"
+                $"{mode},{_lightingSpeed},{GetHardwareKeyboardBrightness()},{direction},{color.R},{color.G},{color.B}"
             );
+            SaveKeyboardActiveProfile(KeyboardProfileEffect);
         }
         catch
         {
             // Failing to save a UI preset should not break keyboard control.
         }
+    }
+
+    private static string? GetKeyboardActiveProfile()
+    {
+        if (File.Exists(KeyboardActiveProfilePath))
+        {
+            var profile = File.ReadAllText(KeyboardActiveProfilePath).Trim().ToLowerInvariant();
+            if (profile is KeyboardProfileZones or KeyboardProfileEffect)
+                return profile;
+        }
+
+        var hasZonePreset = File.Exists(KeyboardZonePresetPath);
+        var hasEffectPreset = File.Exists(KeyboardLightingEffectPresetPath);
+
+        if (hasEffectPreset && hasZonePreset)
+        {
+            var zoneTime = File.GetLastWriteTimeUtc(KeyboardZonePresetPath);
+            var effectTime = File.GetLastWriteTimeUtc(KeyboardLightingEffectPresetPath);
+            return effectTime >= zoneTime ? KeyboardProfileEffect : KeyboardProfileZones;
+        }
+
+        if (hasEffectPreset)
+            return KeyboardProfileEffect;
+
+        if (hasZonePreset)
+            return KeyboardProfileZones;
+
+        return null;
+    }
+
+    private static void SaveKeyboardActiveProfile(string profile)
+    {
+        WritePresetFile(KeyboardActiveProfilePath, profile);
+    }
+
+    private async Task<bool> ApplyZonePresetToHardwareAsync()
+    {
+        if (!File.Exists(KeyboardZonePresetPath))
+            return false;
+
+        var value = File.ReadAllText(KeyboardZonePresetPath).Trim();
+        if (!TryParsePerZoneMode(
+                value,
+                out var zone1,
+                out var zone2,
+                out var zone3,
+                out var zone4,
+                out var brightness))
+            return false;
+
+        return await _client.SetPerZoneModeAsync(zone1, zone2, zone3, zone4, GetHardwareKeyboardBrightnessFromStored(brightness));
+    }
+
+    private async Task<bool> ApplyLightingEffectPresetToHardwareAsync()
+    {
+        if (!File.Exists(KeyboardLightingEffectPresetPath))
+            return false;
+
+        var effectValue = File.ReadAllText(KeyboardLightingEffectPresetPath).Trim();
+        if (!TryParseFourZoneMode(
+                effectValue,
+                out var mode,
+                out var speed,
+                out var effectBrightness,
+                out var direction,
+                out var red,
+                out var green,
+                out var blue))
+            return false;
+
+        var color = Color.FromRgb((byte)red, (byte)green, (byte)blue);
+        return await ApplyLightingEffectToHardwareAsync(
+            mode,
+            speed,
+            GetHardwareKeyboardBrightnessFromStored(effectBrightness),
+            direction,
+            color
+        );
+    }
+
+    private int GetHardwareKeyboardBrightnessFromStored(int storedBrightness)
+    {
+        if (_keyBrightnessSlider != null)
+            return GetHardwareKeyboardBrightness();
+
+        return (int)Math.Clamp(storedBrightness, 0, 100);
     }
 
     private static void WritePresetFile(string path, string value)
