@@ -294,7 +294,6 @@
                     <ScrollViewer>
                         <StackPanel Margin="10,0,20,0">
                             <TextBlock Text="Keyboard Lighting" Classes="SectionHeader" />
-                            <TextBlock Text="This Section Requires Testing." Foreground="#FFA500" Margin="0 0 0 10" />
 
                             <!-- Zone Color Control -->
 
@@ -302,133 +301,69 @@
                             <Border Classes="Card" x:Name="ZoneColorControlPanel">
                                 <StackPanel>
                                     <TextBlock Text="Zone Color Control" Classes="SubHeader" />
-                                    <TextBlock Text="Customize colors for each keyboard zone" Opacity="0.7"
-                                               Margin="0 0 0 10" />
 
-                                    <Grid Margin="0 10">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="*" />
-                                        </Grid.ColumnDefinitions>
-                                        <Grid.RowDefinitions>
-                                            <RowDefinition Height="Auto" />
-                                            <RowDefinition Height="Auto" />
-                                            <RowDefinition Height="Auto" />
-                                        </Grid.RowDefinitions>
+                                    <Grid Margin="0 10" ColumnDefinitions="*,*,*,*" RowDefinitions="Auto,Auto,Auto">
+                                        <TextBlock Grid.Row="0" Grid.Column="0" Text="Zone 1"
+                                                   HorizontalAlignment="Center" Margin="0 0 0 8" />
+                                        <TextBlock Grid.Row="0" Grid.Column="1" Text="Zone 2"
+                                                   HorizontalAlignment="Center" Margin="0 0 0 8" />
+                                        <TextBlock Grid.Row="0" Grid.Column="2" Text="Zone 3"
+                                                   HorizontalAlignment="Center" Margin="0 0 0 8" />
+                                        <TextBlock Grid.Row="0" Grid.Column="3" Text="Zone 4"
+                                                   HorizontalAlignment="Center" Margin="0 0 0 8" />
 
+                                        <ColorPicker x:Name="Zone1ColorPicker"
+                                                     Grid.Row="1" Grid.Column="0"
+                                                     IsAlphaEnabled="False"
+                                                     IsAlphaVisible="False"
+                                                     Color="#4287f5"
+                                                     HorizontalAlignment="Stretch"
+                                                     Margin="4,0"
+                                                     Height="50" />
+                                        <ColorPicker x:Name="Zone2ColorPicker"
+                                                     Grid.Row="1" Grid.Column="1"
+                                                     IsAlphaEnabled="False"
+                                                     HexInputAlphaPosition="Trailing"
+                                                     Color="#ff5733"
+                                                     HorizontalAlignment="Stretch"
+                                                     Margin="4,0"
+                                                     Height="50" />
+                                        <ColorPicker x:Name="Zone3ColorPicker"
+                                                     Grid.Row="1" Grid.Column="2"
+                                                     IsAlphaEnabled="False"
+                                                     HexInputAlphaPosition="Trailing"
+                                                     Color="#33ff57"
+                                                     HorizontalAlignment="Stretch"
+                                                     Margin="4,0"
+                                                     Height="50" />
+                                        <ColorPicker x:Name="Zone4ColorPicker"
+                                                     Grid.Row="1" Grid.Column="3"
+                                                     IsAlphaEnabled="False"
+                                                     HexInputAlphaPosition="Trailing"
+                                                     Color="#FFFF01"
+                                                     HorizontalAlignment="Stretch"
+                                                     Margin="4,0"
+                                                     Height="50" />
 
-                                        <!-- Zone 1 -->
-                                        <Grid Grid.Column="0" Grid.Row="0" Margin="10,10" VerticalAlignment="Center">
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="Auto" />
-                                                <ColumnDefinition Width="*" />
-                                                <ColumnDefinition Width="Auto" />
-                                            </Grid.ColumnDefinitions>
-                                            <StackPanel>
-                                                <TextBlock Text="Zone 1:" VerticalAlignment="Center" Margin="0 0 10 15" />
-                                                <Border x:Name="Zone1Border" Background="#4287f5" Height="30"
-                                                        CornerRadius="3" Margin="0 0 10 15" IsVisible="False" />
-
-                                                <ColorPicker x:Name="Zone1ColorPicker"
-                                                             IsAlphaEnabled="False"
-                                                             IsAlphaVisible="False"
-                                                             Color="#4287f5"
-
-                                                             VerticalAlignment="Center"
-                                                             HorizontalAlignment="Left"
-                                                             Height="50"
-                                                             Width="200" />
-
-                                            </StackPanel>
-                                        </Grid>
-
-                                        <!-- Zone 2 -->
-                                        <Grid Grid.Column="1" Grid.Row="0" Margin="10,10">
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="Auto" />
-                                                <ColumnDefinition Width="*" />
-                                                <ColumnDefinition Width="Auto" />
-                                            </Grid.ColumnDefinitions>
-                                            <StackPanel>
-                                                <TextBlock Text="Zone 2:" VerticalAlignment="Center" Margin="0 0 10 15" />
-                                                <Border x:Name="Zone2Border" Background="#ff5733" Height="30"
-                                                        CornerRadius="3" Margin="0 0 10 15" IsVisible="False" />
-                                                <ColorPicker x:Name="Zone2ColorPicker"
-                                                             IsAlphaEnabled="False"
-                                                             HexInputAlphaPosition="Trailing"
-                                                             Color="#ff5733"
-                                                             VerticalAlignment="Center"
-                                                             HorizontalAlignment="Left"
-                                                             Height="50"
-                                                             Width="200" />
-                                            </StackPanel>
-
-                                        </Grid>
-
-                                        <!-- Zone 3 -->
-                                        <Grid Grid.Column="0" Grid.Row="1" Margin="10,10">
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="Auto" />
-                                                <ColumnDefinition Width="*" />
-                                                <ColumnDefinition Width="Auto" />
-                                            </Grid.ColumnDefinitions>
-                                            <StackPanel>
-                                                <TextBlock Text="Zone 3:" VerticalAlignment="Center" Margin="0 0 10 15" />
-                                                <Border x:Name="Zone3Border" Background="#33ff57" Height="30"
-                                                        CornerRadius="3" Margin="0 0 10 15" IsVisible="False" />
-
-                                                <ColorPicker x:Name="Zone3ColorPicker"
-                                                             IsAlphaEnabled="False"
-                                                             HexInputAlphaPosition="Trailing"
-                                                             Color="#33ff57"
-                                                             VerticalAlignment="Center"
-                                                             HorizontalAlignment="Left"
-                                                             Height="50"
-                                                             Width="200" />
-                                            </StackPanel>
-
-                                        </Grid>
-
-                                        <!-- Zone 4 -->
-                                        <Grid Grid.Column="1" Grid.Row="1" Margin="10,10">
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="Auto" />
-                                                <ColumnDefinition Width="*" />
-                                                <ColumnDefinition Width="Auto" />
-                                            </Grid.ColumnDefinitions>
-                                            <StackPanel>
-                                                <TextBlock Text="Zone 4:" VerticalAlignment="Center" Margin="0 0 10 15" />
-                                                <ColorPicker x:Name="Zone4ColorPicker"
-                                                             IsAlphaEnabled="False"
-                                                             HexInputAlphaPosition="Trailing"
-                                                             Color="#FFFF01"
-                                                             VerticalAlignment="Top"
-                                                             HorizontalAlignment="Left"
-                                                             Height="50"
-                                                             Width="200" />
-                                            </StackPanel>
-
-                                        </Grid>
-
-                                        <!-- Brightness -->
-                                        <Grid Grid.ColumnSpan="2" Grid.Row="2">
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="Auto" />
-                                                <ColumnDefinition Width="*" />
-                                                <ColumnDefinition Width="Auto" />
-                                            </Grid.ColumnDefinitions>
+                                        <Grid Grid.Row="2" Grid.ColumnSpan="4" Margin="4,15,4,0"
+                                              ColumnDefinitions="Auto,*,Auto">
                                             <TextBlock Grid.Column="0" Text="Brightness:" VerticalAlignment="Center"
                                                        Margin="0 0 10 0" />
                                             <Slider x:Name="KeyBrightnessSlider" Grid.Column="1" Value="100"
+                                                    Minimum="0" Maximum="100"
+                                                    IsSnapToTickEnabled="True" TickFrequency="1"
                                                     Margin="0 0 10 0" />
                                             <TextBlock x:Name="KeyBrightnessText" Grid.Column="2" Text="100%"
-                                                       VerticalAlignment="Center" />
+                                                       VerticalAlignment="Center" MinWidth="40" />
                                         </Grid>
                                     </Grid>
 
 
-                                    <Button x:Name="ApplyKeyboardColorsButton" Content="Apply Zone Colors"
-                                            Margin="0 15 0 0" />
+                                    <StackPanel Orientation="Horizontal" Spacing="10" Margin="0 15 0 0">
+                                        <Button x:Name="ApplySameColorAllZonesButton"
+                                                Content="Apply Zone 1 to All Zones" />
+                                        <Button x:Name="ApplyKeyboardColorsButton" Content="Apply Zone Colors" />
+                                    </StackPanel>
                                 </StackPanel>
                             </Border>
 
@@ -436,11 +371,9 @@
                             <Border Classes="Card" x:Name="KeyboardEffectsPanel">
                                 <StackPanel>
                                     <TextBlock Text="Lighting Effects" Classes="SubHeader" />
-                                    <TextBlock Text="Choose dynamic lighting effects for your keyboard" Opacity="0.7"
-                                               Margin="0 0 0 10" />
 
-                                    <ComboBox x:Name="LightingModeComboBox" SelectedIndex="0" Width="200"
-                                              HorizontalAlignment="Left" Margin="0 10">
+                                    <ComboBox x:Name="LightingModeComboBox" SelectedIndex="0"
+                                              HorizontalAlignment="Stretch" Margin="0 10">
                                         <ComboBoxItem Content="Static Mode" />
                                         <ComboBoxItem Content="Breathing Mode" />
                                         <ComboBoxItem Content="Neon Mode" />
@@ -455,7 +388,8 @@
                                         <TextBlock Grid.Row="0" Grid.Column="0" Text="Speed:"
                                                    VerticalAlignment="Center" Width="80" />
                                         <Slider x:Name="LightingSpeedSlider" Grid.Row="0" Grid.Column="1" Value="5"
-                                                Maximum="9" Minimum="0" IsSnapToTickEnabled="True" TickFrequency="1" />
+                                                Maximum="9" Minimum="0" IsSnapToTickEnabled="True" TickFrequency="1"
+                                                Margin="0 0 10 0" />
                                         <TextBlock x:Name="LightSpeedTextBlock" Grid.Row="0" Grid.Column="2" Text="5"
                                                    Width="30" TextAlignment="Right" />
 
@@ -466,16 +400,16 @@
                                                      HexInputAlphaPosition="Trailing"
                                                      Color="#FFFF01"
                                                      VerticalAlignment="Top"
-                                                     HorizontalAlignment="Left"
+                                                     HorizontalAlignment="Stretch"
                                                      Height="50"
                                                      Grid.Row="1"
                                                      Grid.Column="1"
-                                                     Width="200" />
+                                                     Margin="0 15 0 0" />
 
                                         <TextBlock Grid.Row="2" Grid.Column="0" Text="Direction:"
                                                    VerticalAlignment="Center" Width="80" Margin="0 15 0 0" />
-                                        <StackPanel Grid.Row="2" Grid.Column="1" Orientation="Horizontal"
-                                                    Margin="0 15 0 0">
+                                        <StackPanel Grid.Row="2" Grid.Column="1"
+                                                    Orientation="Horizontal" Margin="0 15 0 0" Spacing="15">
                                             <RadioButton x:Name="LeftToRightRadioButton" GroupName="DirectionGroup"
                                                          IsChecked="True" Margin="0 0 15 0">
                                                 <StackPanel>
