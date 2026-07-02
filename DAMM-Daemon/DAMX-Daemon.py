@@ -8,6 +8,9 @@ import sys
 import json
 import time
 import argparse
+import ctypes
+import fcntl
+import glob
 import logging
 import logging.handlers
 import socket
@@ -28,6 +31,35 @@ LOG_PATH = "/var/log/DAMX_Daemon_Log.log"
 CONFIG_PATH = "/etc/DAMX_Daemon/config.ini"
 PID_FILE = "/var/run/DAMX-Daemon.pid"
 MODPROBE_CONFIG_PATH = "/etc/modprobe.d/linuwu-sense.conf"
+
+# Acer ENEK5130 HID RGB controller used by newer Nitro/Predator models where
+# linuwu_sense exposes RGB sysfs files but color writes do not affect hardware.
+ENEK5130_HID_ID = "HID_ID=0018:00000CF2:00005130"
+ENEK5130_HID_NAME = "HID_NAME=ENEK5130:00 0CF2:5130"
+
+_IOC_NRBITS = 8
+_IOC_TYPEBITS = 8
+_IOC_SIZEBITS = 14
+_IOC_NRSHIFT = 0
+_IOC_TYPESHIFT = _IOC_NRSHIFT + _IOC_NRBITS
+_IOC_SIZESHIFT = _IOC_TYPESHIFT + _IOC_TYPEBITS
+_IOC_DIRSHIFT = _IOC_SIZESHIFT + _IOC_SIZEBITS
+_IOC_WRITE = 1
+_IOC_READ = 2
+
+
+def _IOC(direction, type_, nr, size):
+    return (
+        (direction << _IOC_DIRSHIFT)
+        | (ord(type_) << _IOC_TYPESHIFT)
+        | (nr << _IOC_NRSHIFT)
+        | (size << _IOC_SIZESHIFT)
+    )
+
+
+def HIDIOCSFEATURE(length):
+    # linux/hidraw.h: _IOC(_IOC_WRITE|_IOC_READ, 'H', 0x06, len)
+    return _IOC(_IOC_WRITE | _IOC_READ, 'H', 0x06, length)
 
 # Check if running as root
 if os.geteuid() != 0:
@@ -100,6 +132,7 @@ class DAMXManager:
         
         self.base_path = self._get_base_path()
         self.has_four_zone_kb = self._check_four_zone_kb()
+        self.enek5130_hid_device = self._find_enek5130_hid_device()
         self.current_modprobe_param = self._detect_current_modprobe_param()
 
         # Available features set
@@ -108,6 +141,7 @@ class DAMXManager:
         log.info(f"Detected laptop type: {self.laptop_type.name}")
         log.info(f"Base path: {self.base_path}")
         log.info(f"Four-zone keyboard: {'Yes' if self.has_four_zone_kb else 'No'}")
+        log.info(f"ENEK5130 HID RGB device: {self.enek5130_hid_device or 'Not found'}")
         log.info(f"Available features: {', '.join(self.available_features)}")
 
         # Check if paths exist
@@ -474,6 +508,13 @@ class DAMXManager:
             if os.path.exists(os.path.join(kb_base, "four_zone_mode")):
                 available.add("four_zone_mode")
 
+        # Newer Acer keyboards can require direct ENEK5130 HID feature reports.
+        # Do not advertise the existing linuwu_sense RGB feature names unless
+        # their sysfs files exist; the ENEK backend is currently a static-color
+        # supplement for devices where those sysfs writes are ineffective.
+        if self.enek5130_hid_device:
+            available.add("enek5130_hid_rgb")
+
         return available
 
     def _check_four_zone_kb(self) -> bool:
@@ -501,6 +542,79 @@ class DAMXManager:
         except Exception as e:
             log.error(f"Failed to write to {path}: {e}")
             return False
+
+    def _find_enek5130_hid_device(self) -> str:
+        """Find the ENEK5130 RGB hidraw device by stable sysfs identity."""
+        candidates = self._find_enek5130_hid_candidates()
+        return candidates[0] if candidates else ""
+
+    def _find_enek5130_hid_candidates(self) -> List[str]:
+        """Find all ENEK5130 hidraw candidates by stable sysfs identity."""
+        candidates = []
+        for dev in sorted(glob.glob('/dev/hidraw*')):
+            uevent_path = f"/sys/class/hidraw/{os.path.basename(dev)}/device/uevent"
+            try:
+                with open(uevent_path, 'r', encoding='utf-8') as f:
+                    uevent = f.read()
+            except OSError:
+                continue
+
+            if ENEK5130_HID_ID in uevent or ENEK5130_HID_NAME in uevent:
+                candidates.append(dev)
+
+        return candidates
+
+    def _set_enek5130_static_color(self, red: int, green: int, blue: int, brightness: int,
+                                   speed: int = 0, direction: int = 0) -> bool:
+        """Set static all-zone color using the Acer ENEK5130 HID feature report.
+
+        Known packet format for static all-zone RGB:
+        a4 21 02 brightness speed direction rr gg bb 0f 00
+        """
+        candidates = self._find_enek5130_hid_candidates()
+        if self.enek5130_hid_device and self.enek5130_hid_device not in candidates:
+            candidates.insert(0, self.enek5130_hid_device)
+
+        if not candidates:
+            log.debug("ENEK5130 HID RGB device not found")
+            return False
+
+        if not (0 <= brightness <= 100):
+            log.error(f"Invalid ENEK5130 brightness. Must be between 0 and 100: {brightness}")
+            return False
+
+        if not all(0 <= color <= 255 for color in [red, green, blue]):
+            log.error(f"Invalid ENEK5130 RGB values. Must be 0-255: {red},{green},{blue}")
+            return False
+
+        # The known-good static packet uses direction=0. Keep speed/direction
+        # reserved at 0 for static writes until ENEK5130 effects are mapped.
+        packet = bytes([
+            0xA4, 0x21, 0x02, brightness,
+            0x00, 0x00,
+            red, green, blue, 0x0F, 0x00
+        ])
+
+        for device in candidates:
+            try:
+                fd = os.open(device, os.O_RDWR | os.O_NONBLOCK)
+                try:
+                    buf = ctypes.create_string_buffer(packet, len(packet))
+                    ret = fcntl.ioctl(fd, HIDIOCSFEATURE(len(packet)), buf, True)
+                    log.info(
+                        "Set ENEK5130 HID RGB via %s report=%s ret=%s",
+                        device,
+                        ' '.join(f'{b:02x}' for b in packet),
+                        ret
+                    )
+                    self.enek5130_hid_device = device
+                    return True
+                finally:
+                    os.close(fd)
+            except Exception as e:
+                log.warning(f"Failed ENEK5130 HID RGB candidate {device}: {e}")
+
+        return False
 
     def get_thermal_profile(self) -> str:
         """Get current thermal profile"""
@@ -705,6 +819,14 @@ class DAMXManager:
             return False
 
         value = f"{zone1},{zone2},{zone3},{zone4},{brightness}\n"
+
+        if self.enek5130_hid_device and len({zone1.lower(), zone2.lower(), zone3.lower(), zone4.lower()}) == 1:
+            red = int(zone1[0:2], 16)
+            green = int(zone1[2:4], 16)
+            blue = int(zone1[4:6], 16)
+            if self._set_enek5130_static_color(red, green, blue, brightness):
+                return True
+
         return self._write_file(
             "/sys/module/linuwu_sense/drivers/platform:acer-wmi/acer-wmi/four_zoned_kb/per_zone_mode",
             value
@@ -753,6 +875,14 @@ class DAMXManager:
             return False
 
         value = f"{mode},{speed},{brightness},{direction},{red},{green},{blue}\n"
+
+        if self.enek5130_hid_device:
+            # We currently know the ENEK5130 static all-zone color packet. Use it
+            # for DAMX static mode and fall back to linuwu_sense for effects.
+            if mode == 0:
+                if self._set_enek5130_static_color(red, green, blue, brightness):
+                    return True
+
         return self._write_file(
             "/sys/module/linuwu_sense/drivers/platform:acer-wmi/acer-wmi/four_zoned_kb/four_zone_mode",
             value
