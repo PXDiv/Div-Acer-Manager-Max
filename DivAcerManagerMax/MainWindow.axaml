@@ -496,6 +496,89 @@
                                 </StackPanel>
                             </Border>
 
+
+
+                            <!-- Back Logo / Lightbar -->
+                            <Border Classes="Card" x:Name="BackLogoControls">
+                                <StackPanel>
+                                    <TextBlock Text="Back Logo / Lightbar" Classes="SubHeader" />
+                                    <TextBlock Text="Rear display-lid logo/lightbar control. Static mode is firmware-backed; animated effects are software-driven and intentionally rate-limited."
+                                               Opacity="0.7" Margin="0 0 0 10" TextWrapping="Wrap" />
+
+                                    <CheckBox x:Name="BackLogoEnabledCheckBox"
+                                              Content="Enable rear logo/lightbar" IsChecked="True"
+                                              Margin="0 10" />
+
+                                    <Grid ColumnDefinitions="Auto,*,Auto" RowDefinitions="Auto,Auto,Auto,Auto" Margin="0 10">
+                                        <TextBlock Grid.Row="0" Grid.Column="0" Text="Color:"
+                                                   VerticalAlignment="Center" Width="90" />
+                                        <ColorPicker x:Name="BackLogoColorPicker"
+                                                     IsAlphaEnabled="True"
+                                                     HexInputAlphaPosition="Trailing"
+                                                     Color="#FFFFFFFF"
+                                                     VerticalAlignment="Top"
+                                                     HorizontalAlignment="Left"
+                                                     Height="54"
+                                                     Grid.Row="0"
+                                                     Grid.Column="1"
+                                                     Width="230" />
+
+                                        <TextBlock Grid.Row="1" Grid.Column="0" Text="Brightness:"
+                                                   VerticalAlignment="Center" Width="90" Margin="0 15 0 0" />
+                                        <Slider x:Name="BackLogoBrightnessSlider" Grid.Row="1" Grid.Column="1" Value="100"
+                                                Maximum="100" Minimum="0" IsSnapToTickEnabled="True" TickFrequency="1"
+                                                Margin="0 15 10 0" />
+                                        <TextBlock x:Name="BackLogoBrightnessText" Grid.Row="1" Grid.Column="2" Text="100%"
+                                                   VerticalAlignment="Center" Width="55" TextAlignment="Right" Margin="0 15 0 0" />
+
+                                        <TextBlock Grid.Row="2" Grid.Column="0" Text="Opacity:"
+                                                   VerticalAlignment="Center" Width="90" Margin="0 10 0 0" />
+                                        <Slider x:Name="BackLogoOpacitySlider" Grid.Row="2" Grid.Column="1" Value="100"
+                                                Maximum="100" Minimum="0" IsSnapToTickEnabled="True" TickFrequency="1"
+                                                Margin="0 10 10 0" />
+                                        <TextBlock x:Name="BackLogoOpacityText" Grid.Row="2" Grid.Column="2" Text="100%"
+                                                   VerticalAlignment="Center" Width="55" TextAlignment="Right" Margin="0 10 0 0" />
+
+                                        <TextBlock Grid.Row="3" Grid.Column="0" Text="Effect:"
+                                                   VerticalAlignment="Center" Width="90" Margin="0 12 0 0" />
+                                        <StackPanel Grid.Row="3" Grid.Column="1" Grid.ColumnSpan="2" Orientation="Horizontal" Spacing="10" Margin="0 12 0 0">
+                                            <ComboBox x:Name="BackLogoEffectComboBox" SelectedIndex="0" Width="185">
+                                                <ComboBoxItem Content="Static" />
+                                                <ComboBoxItem Content="Rainbow Cycle" />
+                                                <ComboBoxItem Content="Breathing" />
+                                            </ComboBox>
+                                            <TextBlock Text="Speed" VerticalAlignment="Center" Margin="5 0" />
+                                            <Slider x:Name="BackLogoEffectSpeedSlider" Width="150" Value="5"
+                                                    Minimum="1" Maximum="10" TickFrequency="1" IsSnapToTickEnabled="True" />
+                                            <TextBlock x:Name="BackLogoEffectSpeedText" Text="5" VerticalAlignment="Center" Width="25" />
+                                        </StackPanel>
+                                    </Grid>
+
+                                    <TextBlock Text="Color presets" Classes="SubHeader" Margin="0 12 0 5" />
+                                    <WrapPanel Margin="0 0 0 10">
+                                        <Button x:Name="BackLogoPresetWhite" Content="White" Margin="0 4 6 4" />
+                                        <Button x:Name="BackLogoPresetIce" Content="Ice" Margin="0 4 6 4" />
+                                        <Button x:Name="BackLogoPresetCyan" Content="Cyan" Margin="0 4 6 4" />
+                                        <Button x:Name="BackLogoPresetBlue" Content="Blue" Margin="0 4 6 4" />
+                                        <Button x:Name="BackLogoPresetPurple" Content="Purple" Margin="0 4 6 4" />
+                                        <Button x:Name="BackLogoPresetPink" Content="Pink" Margin="0 4 6 4" />
+                                        <Button x:Name="BackLogoPresetRed" Content="Red" Margin="0 4 6 4" />
+                                        <Button x:Name="BackLogoPresetOrange" Content="Orange" Margin="0 4 6 4" />
+                                        <Button x:Name="BackLogoPresetYellow" Content="Yellow" Margin="0 4 6 4" />
+                                        <Button x:Name="BackLogoPresetGreen" Content="Green" Margin="0 4 6 4" />
+                                    </WrapPanel>
+
+                                    <TextBlock x:Name="BackLogoEffectiveText"
+                                               Text="Effective output: static color at 100% intensity"
+                                               Opacity="0.65" Margin="0 0 0 8" TextWrapping="Wrap" />
+
+                                    <StackPanel Orientation="Horizontal" Spacing="10">
+                                        <Button x:Name="ApplyBackLogoButton" Content="Apply Logo" Margin="0 5 0 0" />
+                                        <Button x:Name="StopBackLogoEffectButton" Content="Stop Effect" IsEnabled="False" Margin="0 5 0 0" />
+                                    </StackPanel>
+                                </StackPanel>
+                            </Border>
+
                             <!-- Backlight Timeout -->
                             <Border Classes="Card" x:Name="BacklightTimeoutControls">
                                 <StackPanel>
