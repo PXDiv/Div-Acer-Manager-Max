@@ -18,7 +18,7 @@ import traceback
 from pathlib import Path
 from enum import Enum
 from PowerSourceDetection import PowerSourceDetector 
-from typing import Dict, List, Tuple, Set
+from typing import Dict, List, Tuple, Set, Optional
 # from KeyboardMonitor import KeyboardMonitor
 
 # Constants
@@ -474,6 +474,12 @@ class DAMXManager:
             if os.path.exists(os.path.join(kb_base, "four_zone_mode")):
                 available.add("four_zone_mode")
 
+        # Check rear logo / back-lid lightbar support.
+        # This is exposed by patched PHN16-72 drivers as:
+        #   /sys/module/linuwu_sense/drivers/platform:acer-wmi/acer-wmi/back_logo/color
+        if self._get_back_logo_color_path():
+            available.add("back_logo")
+
         return available
 
     def _check_four_zone_kb(self) -> bool:
@@ -482,6 +488,18 @@ class DAMXManager:
             kb_path = "/sys/module/linuwu_sense/drivers/platform:acer-wmi/acer-wmi/four_zoned_kb"
             return os.path.exists(kb_path)
         return False
+
+    def _get_back_logo_color_path(self) -> Optional[str]:
+        """Return the sysfs path for the rear logo/lightbar color control if present."""
+        candidates = [
+            "/sys/module/linuwu_sense/drivers/platform:acer-wmi/acer-wmi/back_logo/color",
+        ]
+
+        for path in candidates:
+            if os.path.exists(path):
+                return path
+
+        return None
 
     def _read_file(self, path: str) -> str:
         """Read from a VFS file"""
@@ -758,6 +776,53 @@ class DAMXManager:
             value
         )
 
+
+    def get_back_logo_color(self) -> str:
+        """Get rear logo/lightbar RGB configuration: RRGGBB,brightness,enable."""
+        if "back_logo" not in self.available_features:
+            return ""
+
+        color_path = self._get_back_logo_color_path()
+        if not color_path:
+            return ""
+
+        return self._read_file(color_path)
+
+    def set_back_logo_color(self, color: str, brightness: int, enabled: bool) -> bool:
+        """Set rear logo/lightbar RGB configuration.
+
+        Args:
+            color: RGB hex value in RRGGBB format.
+            brightness: Brightness between 0 and 100.
+            enabled: True to power the lightbar/logo, False to disable it.
+        """
+        if "back_logo" not in self.available_features:
+            return False
+
+        normalized = str(color).strip().lstrip("#")
+        if len(normalized) != 6:
+            log.error(f"Invalid back logo color length: {color}. Must be RRGGBB.")
+            return False
+
+        try:
+            int(normalized, 16)
+        except ValueError:
+            log.error(f"Invalid back logo color: {color}. Must be hexadecimal RRGGBB.")
+            return False
+
+        if not (0 <= brightness <= 100):
+            log.error(f"Invalid back logo brightness. Must be between 0 and 100: {brightness}")
+            return False
+
+        color_path = self._get_back_logo_color_path()
+        if not color_path:
+            log.error("Back logo sysfs color path is not available")
+            return False
+
+        enable_value = 1 if enabled else 0
+        value = f"{normalized.upper()},{brightness},{enable_value}\n"
+        return self._write_file(color_path, value)
+
     def get_all_settings(self) -> Dict:
         """Get all DAMX-Daemon settings as a dictionary"""
         settings = {
@@ -813,6 +878,9 @@ class DAMXManager:
 
         if "four_zone_mode" in self.available_features:
             settings["four_zone_mode"] = self.get_four_zone_mode()
+
+        if "back_logo" in self.available_features:
+            settings["back_logo_color"] = self.get_back_logo_color()
 
         return settings
 
@@ -1157,6 +1225,28 @@ class DaemonServer:
                         "blue": blue
                     } if success else None,
                     "error": "Failed to set four-zone mode" if not success else None
+                }
+
+            elif command == "set_back_logo_color":
+                # Check if feature is available
+                if "back_logo" not in self.manager.available_features:
+                    return {
+                        "success": False,
+                        "error": "Back logo/lightbar control is not supported on this device"
+                    }
+
+                color = params.get("color", "FFFFFF")
+                brightness = params.get("brightness", 100)
+                enabled = params.get("enabled", True)
+                success = self.manager.set_back_logo_color(color, brightness, enabled)
+                return {
+                    "success": success,
+                    "data": {
+                        "color": color,
+                        "brightness": brightness,
+                        "enabled": enabled
+                    } if success else None,
+                    "error": "Failed to set back logo/lightbar color" if not success else None
                 }
 
             elif command == "get_supported_features":
