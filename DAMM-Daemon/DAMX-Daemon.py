@@ -564,12 +564,13 @@ class DAMXManager:
 
         return candidates
 
-    def _set_enek5130_static_color(self, red: int, green: int, blue: int, brightness: int,
-                                   speed: int = 0, direction: int = 0) -> bool:
-        """Set static all-zone color using the Acer ENEK5130 HID feature report.
+    def _set_enek5130_zone_color(self, red: int, green: int, blue: int,
+                                  brightness: int, zone_mask: int) -> bool:
+        """Set a color on one or more ENEK5130 keyboard zones.
 
-        Known packet format for static all-zone RGB:
-        a4 21 02 brightness speed direction rr gg bb 0f 00
+        Known packet format:
+        a4 21 02 brightness speed direction rr gg bb zone_mask 00
+        zone_mask 0x01/0x02/0x04/0x08 targets zones 1-4; 0x0f targets all zones.
         """
         candidates = self._find_enek5130_hid_candidates()
         if self.enek5130_hid_device and self.enek5130_hid_device not in candidates:
@@ -587,12 +588,16 @@ class DAMXManager:
             log.error(f"Invalid ENEK5130 RGB values. Must be 0-255: {red},{green},{blue}")
             return False
 
-        # The known-good static packet uses direction=0. Keep speed/direction
-        # reserved at 0 for static writes until ENEK5130 effects are mapped.
+        if not (0 <= zone_mask <= 0x0F):
+            log.error(f"Invalid ENEK5130 zone mask. Must be 0x00-0x0f: {zone_mask:#x}")
+            return False
+
+        # The known-good static packet uses speed=0 and direction=0. Keep these
+        # fields reserved until ENEK5130 effects are mapped.
         packet = bytes([
             0xA4, 0x21, 0x02, brightness,
             0x00, 0x00,
-            red, green, blue, 0x0F, 0x00
+            red, green, blue, zone_mask, 0x00
         ])
 
         for device in candidates:
@@ -615,6 +620,22 @@ class DAMXManager:
                 log.warning(f"Failed ENEK5130 HID RGB candidate {device}: {e}")
 
         return False
+
+    def _set_enek5130_static_color(self, red: int, green: int, blue: int, brightness: int,
+                                   speed: int = 0, direction: int = 0) -> bool:
+        """Set static all-zone color using the Acer ENEK5130 HID feature report."""
+        return self._set_enek5130_zone_color(red, green, blue, brightness, 0x0F)
+
+    def _set_enek5130_per_zone_color(self, zones: List[str], brightness: int) -> bool:
+        """Set four ENEK5130 zones using confirmed zone masks 0x01,0x02,0x04,0x08."""
+        zone_masks = [0x01, 0x02, 0x04, 0x08]
+        for zone, zone_mask in zip(zones, zone_masks):
+            red = int(zone[0:2], 16)
+            green = int(zone[2:4], 16)
+            blue = int(zone[4:6], 16)
+            if not self._set_enek5130_zone_color(red, green, blue, brightness, zone_mask):
+                return False
+        return True
 
     def get_thermal_profile(self) -> str:
         """Get current thermal profile"""
@@ -820,11 +841,8 @@ class DAMXManager:
 
         value = f"{zone1},{zone2},{zone3},{zone4},{brightness}\n"
 
-        if self.enek5130_hid_device and len({zone1.lower(), zone2.lower(), zone3.lower(), zone4.lower()}) == 1:
-            red = int(zone1[0:2], 16)
-            green = int(zone1[2:4], 16)
-            blue = int(zone1[4:6], 16)
-            if self._set_enek5130_static_color(red, green, blue, brightness):
+        if self.enek5130_hid_device:
+            if self._set_enek5130_per_zone_color([zone1, zone2, zone3, zone4], brightness):
                 return True
 
         return self._write_file(
