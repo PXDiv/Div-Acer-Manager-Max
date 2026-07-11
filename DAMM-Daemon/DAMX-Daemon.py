@@ -15,6 +15,11 @@ import threading
 import signal
 import configparser
 import traceback
+import glob
+import fcntl
+import math
+import random
+import colorsys
 from pathlib import Path
 from enum import Enum
 from PowerSourceDetection import PowerSourceDetector 
@@ -28,6 +33,13 @@ LOG_PATH = "/var/log/DAMX_Daemon_Log.log"
 CONFIG_PATH = "/etc/DAMX_Daemon/config.ini"
 PID_FILE = "/var/run/DAMX-Daemon.pid"
 MODPROBE_CONFIG_PATH = "/etc/modprobe.d/linuwu-sense.conf"
+
+# ENEK5130 i2c-HID keyboard RGB controller (e.g. PHN16S-71 / Helios Neo 16S AI).
+# On these models the Acer WMI four-zone interface accepts writes (AE_OK) but
+# they never reach the LED controller; static per-zone RGB must go through
+# this chip instead. Protocol notes: https://github.com/shwetankg07/kbrgb
+ENEK5130_HIDIOCSFEATURE_11 = 0xC00B4806
+ENEK5130_ZONE_MASKS = (0x01, 0x02, 0x04, 0x08)
 
 # Check if running as root
 if os.geteuid() != 0:
@@ -54,6 +66,112 @@ class LaptopType(Enum):
     UNKNOWN = 0
     PREDATOR = 1
     NITRO = 2
+
+class ENEK5130Animator:
+    """Renders the dynamic keyboard effects (modes 1-7) for ENEK5130 models
+    by streaming color frames to the chip, since the WMI effect interface
+    never reaches the LED controller on this hardware"""
+
+    def __init__(self, dev_path: str):
+        self.dev_path = dev_path
+        self._stop_event = threading.Event()
+        self._thread = None
+
+    def stop(self):
+        """Stop the effect thread if one is running"""
+        self._stop_event.set()
+        if self._thread and self._thread.is_alive():
+            self._thread.join(timeout=1.0)
+        self._thread = None
+
+    def start(self, mode: int, speed: int, brightness: int, direction: int,
+              red: int, green: int, blue: int):
+        """Start rendering the given effect in a background thread"""
+        self.stop()
+        self._stop_event.clear()
+        self._thread = threading.Thread(
+            target=self._run,
+            args=(mode, speed, brightness, direction, red, green, blue),
+            daemon=True)
+        self._thread.start()
+
+    def _run(self, mode, speed, brightness, direction, red, green, blue):
+        period = float(max(1, 10 - speed))  # speed 0-9 -> period 10s..1s
+        base = (red, green, blue)
+        flip = -1.0 if direction == 1 else 1.0
+        twinkle = [0.0] * 4
+        dev = None
+        t0 = time.monotonic()
+        while not self._stop_event.is_set():
+            try:
+                if dev is None:
+                    dev = open(self.dev_path, "rb+", buffering=0)
+                t = time.monotonic() - t0
+                zones = self._frame(mode, t, period, base, flip, twinkle)
+                for mask, (r, g, b) in zip(ENEK5130_ZONE_MASKS, zones):
+                    pkt = bytearray([0xA4, 0x21, 0x02,
+                                     max(0, min(100, int(brightness))),
+                                     0, 0, int(r), int(g), int(b), mask, 0])
+                    fcntl.ioctl(dev.fileno(), ENEK5130_HIDIOCSFEATURE_11, pkt)
+                self._stop_event.wait(0.07)
+            except OSError:
+                # device went away (suspend/resume), reopen and retry
+                try:
+                    if dev:
+                        dev.close()
+                except OSError:
+                    pass
+                dev = None
+                self._stop_event.wait(2.0)
+        try:
+            if dev:
+                dev.close()
+        except OSError:
+            pass
+
+    @staticmethod
+    def _hsv(h):
+        r, g, b = colorsys.hsv_to_rgb(h % 1.0, 1.0, 1.0)
+        return int(r * 255), int(g * 255), int(b * 255)
+
+    @staticmethod
+    def _dim(color, k):
+        k = max(0.0, min(1.0, k))
+        return int(color[0] * k), int(color[1] * k), int(color[2] * k)
+
+    def _frame(self, mode, t, p, base, flip, twinkle):
+        """Return the four zone colors for this frame."""
+        if mode == 1:  # Breathing
+            k = (1 - math.cos(2 * math.pi * t / p)) / 2
+            return [self._dim(base, k)] * 4
+        if mode == 2:  # Neon: cycle the color wheel
+            return [self._hsv(t / p)] * 4
+        if mode == 3:  # Wave: moving rainbow across the zones
+            return [self._hsv(t / p * flip + i / 4.0) for i in range(4)]
+        if mode == 4:  # Shifting: colored block marching across zones
+            pos = (t / p * 4.0 * flip) % 4.0
+            out = []
+            for i in range(4):
+                d = (pos - i) % 4.0
+                circ = min(d, 4.0 - d)
+                out.append(self._dim(base, max(0.08, 1.0 - circ / 1.6)))
+            return out
+        if mode == 5:  # Zoom: pulse expanding from the center
+            return [self._dim(base, (1 - math.cos(2 * math.pi *
+                    (t / p - abs(i - 1.5) * 0.15))) / 2) for i in range(4)]
+        if mode == 6:  # Meteor: comet with wrap-around tail
+            pos = (t / p * 4.0 * flip) % 4.0
+            return [self._dim(base,
+                    max(0.0, 1.0 - ((pos - i) % 4.0) / 2.6) ** 1.4)
+                    for i in range(4)]
+        if mode == 7:  # Twinkling
+            for i in range(4):
+                twinkle[i] *= 0.80
+            if random.random() < 0.35:
+                twinkle[random.randrange(4)] = 1.0
+            return [self._dim(base, twinkle[i]) for i in range(4)]
+        return [base] * 4  # mode 0 / unknown: static
+
 
 class DAMXManager:
     """Manages all the DAMX-Daemon features"""
@@ -99,6 +217,9 @@ class DAMXManager:
             self._reset_restart_attempts()
         
         self.base_path = self._get_base_path()
+        self.enek5130_dev = self._find_enek5130()
+        self.enek_animator = (ENEK5130Animator(self.enek5130_dev)
+                              if self.enek5130_dev else None)
         self.has_four_zone_kb = self._check_four_zone_kb()
         self.current_modprobe_param = self._detect_current_modprobe_param()
 
@@ -108,6 +229,7 @@ class DAMXManager:
         log.info(f"Detected laptop type: {self.laptop_type.name}")
         log.info(f"Base path: {self.base_path}")
         log.info(f"Four-zone keyboard: {'Yes' if self.has_four_zone_kb else 'No'}")
+        log.info(f"ENEK5130 RGB controller: {self.enek5130_dev or 'not present'}")
         log.info(f"Available features: {', '.join(self.available_features)}")
 
         # Check if paths exist
@@ -473,6 +595,11 @@ class DAMXManager:
                 available.add("per_zone_mode")
             if os.path.exists(os.path.join(kb_base, "four_zone_mode")):
                 available.add("four_zone_mode")
+            # ENEK5130 models support both via HID even when the sysfs
+            # interface is missing or non-functional
+            if self.enek5130_dev is not None:
+                available.add("per_zone_mode")
+                available.add("four_zone_mode")
 
         return available
 
@@ -480,8 +607,38 @@ class DAMXManager:
         """Check if four-zone keyboard is available"""
         if self.laptop_type != LaptopType.UNKNOWN:
             kb_path = "/sys/module/linuwu_sense/drivers/platform:acer-wmi/acer-wmi/four_zoned_kb"
-            return os.path.exists(kb_path)
+            return os.path.exists(kb_path) or self.enek5130_dev is not None
         return False
+
+    def _find_enek5130(self):
+        """Locate the ENE KB5130 i2c-HID RGB controller, if present"""
+        for p in glob.glob("/sys/class/hidraw/hidraw*"):
+            try:
+                with open(os.path.join(p, "device/uevent")) as f:
+                    if "ENEK5130" in f.read():
+                        return "/dev/" + os.path.basename(p)
+            except OSError:
+                continue
+        return None
+
+    def _enek5130_write_zones(self, zones, brightness: int) -> bool:
+        """Write static per-zone colors via the ENEK5130 HID feature report.
+
+        Verified on PHN16S-71: brightness byte range is 0-100 and zones must
+        be written individually (the 0x0f all-zones mask misbehaves).
+        """
+        try:
+            with open(self.enek5130_dev, "rb+", buffering=0) as f:
+                for mask, zone in zip(ENEK5130_ZONE_MASKS, zones):
+                    r, g, b = (int(zone[i:i + 2], 16) for i in (0, 2, 4))
+                    pkt = bytearray([0xA4, 0x21, 0x02,
+                                     max(0, min(100, brightness)),
+                                     0, 0, r, g, b, mask, 0])
+                    fcntl.ioctl(f.fileno(), ENEK5130_HIDIOCSFEATURE_11, pkt)
+            return True
+        except OSError as e:
+            log.error(f"ENEK5130 HID write failed: {e}")
+            return False
 
     def _read_file(self, path: str) -> str:
         """Read from a VFS file"""
@@ -675,7 +832,11 @@ class DAMXManager:
         if "per_zone_mode" not in self.available_features:
             return ""
 
-        return self._read_file("/sys/module/linuwu_sense/drivers/platform:acer-wmi/acer-wmi/four_zoned_kb/per_zone_mode")
+        sysfs_path = "/sys/module/linuwu_sense/drivers/platform:acer-wmi/acer-wmi/four_zoned_kb/per_zone_mode"
+        if os.path.exists(sysfs_path):
+            return self._read_file(sysfs_path)
+        # ENEK5130-only models: report the last state applied via HID
+        return getattr(self, "_enek_last_per_zone", "")
 
     def set_per_zone_mode(self, zone1: str, zone2: str, zone3: str, zone4: str, brightness: int) -> bool:
         """Set per-zone mode configuration
@@ -705,17 +866,34 @@ class DAMXManager:
             return False
 
         value = f"{zone1},{zone2},{zone3},{zone4},{brightness}\n"
-        return self._write_file(
-            "/sys/module/linuwu_sense/drivers/platform:acer-wmi/acer-wmi/four_zoned_kb/per_zone_mode",
-            value
-        )
+        sysfs_path = "/sys/module/linuwu_sense/drivers/platform:acer-wmi/acer-wmi/four_zoned_kb/per_zone_mode"
+        sysfs_ok = (self._write_file(sysfs_path, value)
+                    if os.path.exists(sysfs_path) else False)
+
+        # On ENEK5130 models the sysfs write is accepted but never reaches
+        # the LED controller, so mirror the write to the HID chip. Harmless
+        # on models where the sysfs path works.
+        hid_ok = False
+        if self.enek5130_dev:
+            if self.enek_animator:
+                self.enek_animator.stop()
+            hid_ok = self._enek5130_write_zones(
+                (zone1, zone2, zone3, zone4), brightness)
+            if hid_ok:
+                self._enek_last_per_zone = value.strip()
+
+        return sysfs_ok or hid_ok
 
     def get_four_zone_mode(self) -> str:
         """Get four-zone mode configuration"""
         if "four_zone_mode" not in self.available_features:
             return ""
 
-        return self._read_file("/sys/module/linuwu_sense/drivers/platform:acer-wmi/acer-wmi/four_zoned_kb/four_zone_mode")
+        sysfs_path = "/sys/module/linuwu_sense/drivers/platform:acer-wmi/acer-wmi/four_zoned_kb/four_zone_mode"
+        if os.path.exists(sysfs_path):
+            return self._read_file(sysfs_path)
+        # ENEK5130-only models: report the last state applied via HID
+        return getattr(self, "_enek_last_four_zone", "")
 
     def set_four_zone_mode(self, mode: int, speed: int, brightness: int,
                            direction: int, red: int, green: int, blue: int) -> bool:
@@ -753,10 +931,28 @@ class DAMXManager:
             return False
 
         value = f"{mode},{speed},{brightness},{direction},{red},{green},{blue}\n"
-        return self._write_file(
-            "/sys/module/linuwu_sense/drivers/platform:acer-wmi/acer-wmi/four_zoned_kb/four_zone_mode",
-            value
-        )
+        sysfs_path = "/sys/module/linuwu_sense/drivers/platform:acer-wmi/acer-wmi/four_zoned_kb/four_zone_mode"
+        sysfs_ok = (self._write_file(sysfs_path, value)
+                    if os.path.exists(sysfs_path) else False)
+
+        # ENEK5130 models: the WMI/sysfs effects never reach the LED
+        # controller, so static mode is written directly to the HID chip
+        # and dynamic effects are rendered daemon-side.
+        hid_ok = False
+        if self.enek_animator:
+            if mode == 0:
+                self.enek_animator.stop()
+                zone_hex = f"{red:02x}{green:02x}{blue:02x}"
+                hid_ok = self._enek5130_write_zones((zone_hex,) * 4,
+                                                    brightness)
+            else:
+                self.enek_animator.start(mode, speed, brightness, direction,
+                                         red, green, blue)
+                hid_ok = True
+            if hid_ok:
+                self._enek_last_four_zone = value.strip()
+
+        return sysfs_ok or hid_ok
 
     def get_all_settings(self) -> Dict:
         """Get all DAMX-Daemon settings as a dictionary"""
