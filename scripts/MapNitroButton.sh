@@ -53,6 +53,8 @@ fi
 
 # Main functionality
 echo "Monitoring keyboard events on $DEVICE"
-evtest "$DEVICE" | grep --line-buffered "code 425.*value 1" | while read -r line; do
+echo "Predator models usually use keycode 202 (KEY_PROG3). Nitro models often use 425."
+echo "Run 'sudo evtest' and press your launcher key to confirm the keycode for your model."
+evtest "$DEVICE" | grep --line-buffered -E "code (202|425).*value 1" | while read -r line; do
     DAMX &
 done

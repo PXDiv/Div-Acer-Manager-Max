@@ -218,6 +218,19 @@ static struct quirk_entry quirk_acer_predator_phn16_73 = {
    - Ensure `four_zone_kb = 1` is set
    - Check if your keyboard responds to the existing RGB controls
 
+4. **Predator launcher key / Nitro special key**
+   - DAMX-Daemon can launch the GUI when a configured special key is pressed
+   - Default keycodes: `202` (Predator `KEY_PROG3`) and `425` (common Nitro key)
+   - Configure in `/etc/DAMX_Daemon/config.ini` under `[KeyboardMonitor]`:
+     ```ini
+     enabled = true
+     keycodes = 202,425
+     command = /opt/damx/gui/DivAcerManagerMax
+     device_path =
+     ```
+   - Use `sudo evtest`, press the Predator key, and confirm the reported `code` value if the default does not work
+   - The Turbo button is handled by the Linuwu-Sense driver (fan/OC mode) and is not mapped to open DAMX
+
 Remember to always keep a backup of your working kernel/driver before making changes!
 
 ---

@@ -19,7 +19,7 @@ from pathlib import Path
 from enum import Enum
 from PowerSourceDetection import PowerSourceDetector 
 from typing import Dict, List, Tuple, Set
-# from KeyboardMonitor import KeyboardMonitor
+from KeyboardMonitor import KeyboardMonitor
 
 # Constants
 VERSION = "0.4.9"
@@ -28,6 +28,8 @@ LOG_PATH = "/var/log/DAMX_Daemon_Log.log"
 CONFIG_PATH = "/etc/DAMX_Daemon/config.ini"
 PID_FILE = "/var/run/DAMX-Daemon.pid"
 MODPROBE_CONFIG_PATH = "/etc/modprobe.d/linuwu-sense.conf"
+DEFAULT_GUI_COMMAND = "/opt/damx/gui/DivAcerManagerMax"
+DEFAULT_KEYBOARD_KEYCODES = "202,425"
 
 # Check if running as root
 if os.geteuid() != 0:
@@ -1333,6 +1335,54 @@ class DAMXDaemon:
         self.manager = None
         self.server = None
         self.config = None
+        self.power_monitor = None
+        self.keyboard_monitor = None
+
+    def _parse_keyboard_keycodes(self, raw_value: str) -> List[int]:
+        keycodes = []
+        for part in raw_value.split(','):
+            part = part.strip()
+            if not part:
+                continue
+            try:
+                keycodes.append(int(part))
+            except ValueError:
+                log.warning(f"Ignoring invalid keyboard keycode: {part}")
+        return keycodes or [202, 425]
+
+    def _keyboard_monitor_enabled(self) -> bool:
+        if not self.config or 'KeyboardMonitor' not in self.config:
+            return True
+        return self.config.get('KeyboardMonitor', 'enabled', fallback='true').lower() in (
+            'true', '1', 'yes'
+        )
+
+    def _start_keyboard_monitor(self):
+        if not self._keyboard_monitor_enabled():
+            log.info("Keyboard monitor disabled in config")
+            return
+
+        keycodes = self._parse_keyboard_keycodes(
+            self.config.get('KeyboardMonitor', 'keycodes', fallback=DEFAULT_KEYBOARD_KEYCODES)
+        )
+        command = self.config.get(
+            'KeyboardMonitor', 'command', fallback=DEFAULT_GUI_COMMAND
+        )
+        device_path = self.config.get(
+            'KeyboardMonitor', 'device_path', fallback=''
+        ).strip() or None
+
+        self.keyboard_monitor = KeyboardMonitor(
+            target_keycodes=keycodes,
+            command_to_run=command,
+            device_path=device_path,
+            logger=log,
+        )
+
+        if self.keyboard_monitor.start_monitoring():
+            log.info("Keyboard monitoring started successfully")
+        else:
+            log.warning("Failed to start keyboard monitoring")
 
     def load_config(self):
         """Load configuration from file"""
@@ -1345,6 +1395,12 @@ class DAMXDaemon:
                 'LogLevel': 'INFO',
                 'AutoDetectFeatures': 'True'
             }
+            config['KeyboardMonitor'] = {
+                'enabled': 'true',
+                'keycodes': DEFAULT_KEYBOARD_KEYCODES,
+                'command': DEFAULT_GUI_COMMAND,
+                'device_path': ''
+            }
 
             # Create config directory if it doesn't exist
             os.makedirs(os.path.dirname(CONFIG_PATH), exist_ok=True)
@@ -1353,8 +1409,15 @@ class DAMXDaemon:
             with open(CONFIG_PATH, 'w') as f:
                 config.write(f)
         else:
-            # Load existing config
             config.read(CONFIG_PATH)
+
+        if 'KeyboardMonitor' not in config:
+            config['KeyboardMonitor'] = {
+                'enabled': 'true',
+                'keycodes': DEFAULT_KEYBOARD_KEYCODES,
+                'command': DEFAULT_GUI_COMMAND,
+                'device_path': ''
+            }
 
         self.config = config
 
@@ -1378,23 +1441,9 @@ class DAMXDaemon:
             # Initialize DAMXManager
             self.manager = DAMXManager()
 
-            # Initialize keyboard monitor early
-            # self.keyboard_monitor = KeyboardMonitor(
-            #     target_keycode=425, 
-            #     command_to_run="DAMX",  # Updated command
-            #     logger=log
-            # )
-            # kb_success = self.keyboard_monitor.start_monitoring()
-            
-            # if not kb_success:
-            #     log.error("Failed to start keyboard monitoring")
-            #     # Don't return False here - continue with reduced functionality
-
-            # Initialize power monitor
             self.power_monitor = PowerSourceDetector(self.manager)
             self.power_monitor.start_monitoring()
 
-            # Log detected features
             features_str = ", ".join(sorted(self.manager.available_features))
             log.info(f"Detected features: {features_str}")
 
@@ -1416,21 +1465,11 @@ class DAMXDaemon:
         signal.signal(signal.SIGTERM, self.signal_handler)
         signal.signal(signal.SIGINT, self.signal_handler)
 
-        # if self.keyboard_monitor:
-        #     success = self.keyboard_monitor.start_monitoring()
-        #     if success:
-        #         log.info("Keyboard monitoring started successfully")
-        #     else:
-        #         log.warning("Failed to start keyboard monitoring")
-
-        # Set up and run the server
         try:
             self.running = True
             self.server = DaemonServer(self.manager)
-            self.power_monitor.start_monitoring()
+            self._start_keyboard_monitor()
             self.server.start()
-            # Start keyboard monitoring
-            
         except Exception as e:
             log.error(f"Error running daemon: {e}")
             log.error(traceback.format_exc())
@@ -1444,11 +1483,11 @@ class DAMXDaemon:
         # Stop server and clean up socket
         if self.server:
             self.server.stop()
-            self.server.cleanup_socket()  # Additional cleanup
-            # Stop keyboard monitoring
-        # if hasattr(self, 'keyboard_monitor') and self.keyboard_monitor:
-        #     self.keyboard_monitor.stop_monitoring()
-        #     log.info("Keyboard monitoring stopped")
+            self.server.cleanup_socket()
+
+        if self.keyboard_monitor:
+            self.keyboard_monitor.stop_monitoring()
+            log.info("Keyboard monitoring stopped")
     
         if self.power_monitor:
             self.power_monitor.stop_monitoring()
