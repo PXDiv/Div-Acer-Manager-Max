@@ -624,8 +624,9 @@ class DAMXManager:
     def _enek5130_write_zones(self, zones, brightness: int) -> bool:
         """Write static per-zone colors via the ENEK5130 HID feature report.
 
-        Verified on PHN16S-71: brightness byte range is 0-100 and zones must
-        be written individually (the 0x0f all-zones mask misbehaves).
+        Verified on PHN16S-71: brightness byte range is 0-100. Zones are
+        written individually since the GUI sends distinct zone colors; the
+        0x0f all-zones mask also works if a combined write is ever wanted.
         """
         try:
             with open(self.enek5130_dev, "rb+", buffering=0) as f:
