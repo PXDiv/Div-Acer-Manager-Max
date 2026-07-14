@@ -5,7 +5,7 @@
 # Components: Linuwu-Sense (drivers), DAMX-Daemon, and DAMX-GUI
 
 # Constants
-SCRIPT_VERSION="0.8.8"
+SCRIPT_VERSION="0.9.0"
 INSTALL_DIR="/opt/damx"
 BIN_DIR="/usr/local/bin"
 SYSTEMD_DIR="/etc/systemd/system"
@@ -140,6 +140,9 @@ comprehensive_cleanup() {
     rm -f "${SYSTEMD_DIR}/${DAEMON_SERVICE_NAME}"
   fi
 
+  # Clean up nitro key detection service
+  cleanup_nitro_service
+
   # Clean up legacy installations
   cleanup_legacy_installation
 
@@ -160,6 +163,9 @@ comprehensive_cleanup() {
     cd ..
   fi
 
+  # Remove nitro key configuration
+  rm -rf /etc/damx
+
   # Final systemd daemon reload
   systemctl daemon-reload
 
@@ -167,20 +173,43 @@ comprehensive_cleanup() {
   return 0
 }
 
-# Detect if kernel was compiled with LLVM/Clang (e.g., CachyOS, some Arch variants)
-# Returns 0 (true) if LLVM kernel detected, 1 (false) otherwise
-is_llvm_kernel() {
-  # Check kernel build info
-  if grep -qi "clang\|llvm" /proc/version 2>/dev/null; then
-    return 0
+# Function to clean up nitro key detection service
+cleanup_nitro_service() {
+  echo -e "${YELLOW}Cleaning up Nitro Key Detection Service...${NC}"
+  
+  NITRO_SERVICE_NAME="nitro-key-detection.service"
+  
+  # Stop the service if it's running
+  if systemctl is-active --quiet ${NITRO_SERVICE_NAME} 2>/dev/null; then
+    echo "Stopping ${NITRO_SERVICE_NAME}..."
+    systemctl stop ${NITRO_SERVICE_NAME}
   fi
-  # Check for known LLVM-based distros
-  if [ -f /etc/os-release ]; then
-    if grep -qi "cachyos" /etc/os-release; then
-      return 0
-    fi
+  
+  # Disable the service if it's enabled
+  if systemctl is-enabled --quiet ${NITRO_SERVICE_NAME} 2>/dev/null; then
+    echo "Disabling ${NITRO_SERVICE_NAME}..."
+    systemctl disable ${NITRO_SERVICE_NAME}
   fi
-  return 1
+  
+  # Remove the service file
+  if [ -f "${SYSTEMD_DIR}/${NITRO_SERVICE_NAME}" ]; then
+    echo "Removing ${NITRO_SERVICE_NAME} file..."
+    rm -f "${SYSTEMD_DIR}/${NITRO_SERVICE_NAME}"
+  fi
+  
+  # Remove the nitro key detection script
+  if [ -f "/usr/local/bin/nitro-key-detection.sh" ]; then
+    echo "Removing nitro-key-detection.sh script..."
+    rm -f "/usr/local/bin/nitro-key-detection.sh"
+  fi
+  
+  # Remove nitro key configuration
+  if [ -f "/etc/damx/nitro_key.conf" ]; then
+    echo "Removing nitro_key.conf configuration..."
+    rm -f "/etc/damx/nitro_key.conf"
+  fi
+  
+  echo -e "${GREEN}Nitro Key Detection Service cleanup completed.${NC}"
 }
 
 # Install build dependencies based on distribution
@@ -342,6 +371,128 @@ EOL
   return 0
 }
 
+configure_nitro_button() {
+  echo -e "${YELLOW}Configuring Nitro Button Hardware Code...${NC}"
+
+  # Ask user if they want to setup Nitro key with 10 second timeout
+  echo -e "${YELLOW}Do you want to Setup your Nitro Key? (Y/n) - Waiting 10 seconds...${NC}"
+  read -t 10 -n 1 -r response
+  
+  # Default to Yes if timeout or empty response
+  if [[ $? -ne 0 ]] || [[ -z "$response" ]]; then
+    echo -e "\n${BLUE}No response detected. Proceeding with Nitro setup...${NC}"
+    response="Y"
+  fi
+
+  # Check if user wants to skip
+  if [[ ! "$response" =~ ^[Yy]$ ]]; then
+    echo -e "${BLUE}Skipping Nitro button configuration. Using default code (425).${NC}"
+    mkdir -p /etc/damx
+    echo "NITRO_KEY=425" > /etc/damx/nitro_key.conf
+    return 0
+  fi
+
+  if ! command -v evtest &> /dev/null; then
+    echo -e "${BLUE}Installing evtest for hardware detection...${NC}"
+    apt-get update && apt-get install -y evtest
+  fi
+
+  DEVICE=$(grep -A 5 -B 5 "AT Translated Set 2 keyboard" /proc/bus/input/devices | grep -m 1 "event" | sed 's/.*event\([0-9]\+\).*/\/dev\/input\/event\1/')
+  
+  mkdir -p /etc/damx
+
+  if [ -z "$DEVICE" ]; then
+    echo -e "${RED}Error: Keyboard hardware not found! Using default Nitro code (425).${NC}"
+    echo "NITRO_KEY=425" > /etc/damx/nitro_key.conf
+    return 1
+  fi
+
+  echo -e "${GREEN}Keyboard detected at: $DEVICE${NC}"
+  echo -e "${YELLOW}>>> PLEASE PRESS YOUR NITRO (N) BUTTON NOW (Waiting 30 seconds)... <<<${NC}"
+
+  # NitroButton code 
+  CAPTURED_CODE=$(timeout 30 evtest "$DEVICE" | grep -m 1 "type 1 (EV_KEY).*value 1" | sed -n 's/.*code \([0-9]*\).*/\1/p')
+
+  if [ -n "$CAPTURED_CODE" ]; then
+    echo -e "${GREEN}Success! Nitro button code captured: ${CAPTURED_CODE}${NC}"
+    echo "NITRO_KEY=$CAPTURED_CODE" > /etc/damx/nitro_key.conf
+  else
+    echo -e "${RED}Timeout or no key detected. Falling back to default code (425).${NC}"
+    echo "NITRO_KEY=425" > /etc/damx/nitro_key.conf
+  fi
+  
+  # Install NitroKeyDetection.sh as a service
+  install_nitro_service
+}
+
+install_nitro_service() {
+  echo -e "${YELLOW}Installing Nitro Key Detection Service...${NC}"
+  
+    # First, remove any existing installation
+  # cleanup_nitro_service
+  
+  # Get the directory where the main script is located
+  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  NITRO_SCRIPT="$SCRIPT_DIR/nitro-key-detection.sh"
+  
+  # Check if NitroKeyDetection.sh exists
+  if [ ! -f "$NITRO_SCRIPT" ]; then
+    echo -e "${RED}Error: NitroKeyDetection.sh not found in $SCRIPT_DIR${NC}"
+    return 1
+  fi
+  
+  # Make the script executable
+  chmod +x "$NITRO_SCRIPT"
+  
+  # Copy script to /usr/local/bin
+  cp "$NITRO_SCRIPT" /usr/local/bin/
+  chmod +x "/usr/local/bin/nitro-key-detection.sh"
+  
+  # Create systemd service file
+  cat > /etc/systemd/system/nitro-key-detection.service << EOF
+[Unit]
+Description=Nitro Key Detection Service
+After=multi-user.target
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/nitro-key-detection.sh
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+User=root
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+  # Reload systemd, enable and start the service
+  systemctl daemon-reload
+  systemctl enable nitro-key-detection.service
+  systemctl start nitro-key-detection.service
+  
+  # Check if service is running
+  if systemctl is-active --quiet nitro-key-detection.service; then
+    echo -e "${GREEN}✓ Nitro Key Detection Service installed and running successfully!${NC}"
+    echo -e "${GREEN}Service status: $(systemctl status nitro-key-detection.service --no-pager | grep Active)${NC}"
+  else
+    echo -e "${RED}✗ Service installation failed. Checking logs...${NC}"
+    journalctl -u nitro-key-detection.service -n 10 --no-pager
+    return 1
+  fi
+  
+  echo -e "${BLUE}Service commands:${NC}"
+  echo -e "  Start: systemctl start nitro-key-detection.service"
+  echo -e "  Stop:  systemctl stop nitro-key-detection.service"
+  echo -e "  Status: systemctl status nitro-key-detection.service"
+  echo -e "  Logs:  journalctl -u nitro-key-detection.service -f"
+}
+
+# Example of how to call it from your main script
+# configure_nitro_button
+
 perform_install() {
   local skip_drivers=$1
   local is_update=$2
@@ -374,6 +525,9 @@ perform_install() {
 
   install_gui
   GUI_RESULT=$?
+
+  #Setup NitroButton shortcut
+  configure_nitro_button
 
   # Check if all installations were successful
   if [ $DRIVER_RESULT -eq 0 ] && [ $DAEMON_RESULT -eq 0 ] && [ $GUI_RESULT -eq 0 ]; then
