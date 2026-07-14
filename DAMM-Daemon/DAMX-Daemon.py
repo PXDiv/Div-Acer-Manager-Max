@@ -8,6 +8,9 @@ import sys
 import json
 import time
 import argparse
+import ctypes
+import fcntl
+import glob
 import logging
 import logging.handlers
 import socket
@@ -28,6 +31,35 @@ LOG_PATH = "/var/log/DAMX_Daemon_Log.log"
 CONFIG_PATH = "/etc/DAMX_Daemon/config.ini"
 PID_FILE = "/var/run/DAMX-Daemon.pid"
 MODPROBE_CONFIG_PATH = "/etc/modprobe.d/linuwu-sense.conf"
+
+# Acer ENEK5130 HID RGB controller used by newer Nitro/Predator models where
+# linuwu_sense exposes RGB sysfs files but color writes do not affect hardware.
+ENEK5130_HID_ID = "HID_ID=0018:00000CF2:00005130"
+ENEK5130_HID_NAME = "HID_NAME=ENEK5130:00 0CF2:5130"
+
+_IOC_NRBITS = 8
+_IOC_TYPEBITS = 8
+_IOC_SIZEBITS = 14
+_IOC_NRSHIFT = 0
+_IOC_TYPESHIFT = _IOC_NRSHIFT + _IOC_NRBITS
+_IOC_SIZESHIFT = _IOC_TYPESHIFT + _IOC_TYPEBITS
+_IOC_DIRSHIFT = _IOC_SIZESHIFT + _IOC_SIZEBITS
+_IOC_WRITE = 1
+_IOC_READ = 2
+
+
+def _IOC(direction, type_, nr, size):
+    return (
+        (direction << _IOC_DIRSHIFT)
+        | (ord(type_) << _IOC_TYPESHIFT)
+        | (nr << _IOC_NRSHIFT)
+        | (size << _IOC_SIZESHIFT)
+    )
+
+
+def HIDIOCSFEATURE(length):
+    # linux/hidraw.h: _IOC(_IOC_WRITE|_IOC_READ, 'H', 0x06, len)
+    return _IOC(_IOC_WRITE | _IOC_READ, 'H', 0x06, length)
 
 # Check if running as root
 if os.geteuid() != 0:
@@ -100,6 +132,7 @@ class DAMXManager:
         
         self.base_path = self._get_base_path()
         self.has_four_zone_kb = self._check_four_zone_kb()
+        self.enek5130_hid_device = self._find_enek5130_hid_device()
         self.current_modprobe_param = self._detect_current_modprobe_param()
 
         # Available features set
@@ -108,6 +141,7 @@ class DAMXManager:
         log.info(f"Detected laptop type: {self.laptop_type.name}")
         log.info(f"Base path: {self.base_path}")
         log.info(f"Four-zone keyboard: {'Yes' if self.has_four_zone_kb else 'No'}")
+        log.info(f"ENEK5130 HID RGB device: {self.enek5130_hid_device or 'Not found'}")
         log.info(f"Available features: {', '.join(self.available_features)}")
 
         # Check if paths exist
@@ -474,6 +508,13 @@ class DAMXManager:
             if os.path.exists(os.path.join(kb_base, "four_zone_mode")):
                 available.add("four_zone_mode")
 
+        # Newer Acer keyboards can require direct ENEK5130 HID feature reports.
+        # Do not advertise the existing linuwu_sense RGB feature names unless
+        # their sysfs files exist; the ENEK backend is currently a static-color
+        # supplement for devices where those sysfs writes are ineffective.
+        if self.enek5130_hid_device:
+            available.add("enek5130_hid_rgb")
+
         return available
 
     def _check_four_zone_kb(self) -> bool:
@@ -501,6 +542,149 @@ class DAMXManager:
         except Exception as e:
             log.error(f"Failed to write to {path}: {e}")
             return False
+
+    def _find_enek5130_hid_device(self) -> str:
+        """Find the ENEK5130 RGB hidraw device by stable sysfs identity."""
+        candidates = self._find_enek5130_hid_candidates()
+        return candidates[0] if candidates else ""
+
+    def _find_enek5130_hid_candidates(self) -> List[str]:
+        """Find all ENEK5130 hidraw candidates by stable sysfs identity."""
+        candidates = []
+        for dev in sorted(glob.glob('/dev/hidraw*')):
+            uevent_path = f"/sys/class/hidraw/{os.path.basename(dev)}/device/uevent"
+            try:
+                with open(uevent_path, 'r', encoding='utf-8') as f:
+                    uevent = f.read()
+            except OSError:
+                continue
+
+            if ENEK5130_HID_ID in uevent or ENEK5130_HID_NAME in uevent:
+                candidates.append(dev)
+
+        return candidates
+
+    def _set_enek5130_hid_report(self, effect: int, red: int, green: int, blue: int,
+                                  brightness: int, speed: int, direction: int,
+                                  zone_mask: int) -> bool:
+        """Send an ENEK5130 keyboard RGB HID feature report.
+
+        Known packet format:
+        a4 21 effect brightness speed direction rr gg bb zone_mask 00
+        zone_mask 0x01/0x02/0x04/0x08 targets zones 1-4; 0x0f targets all zones.
+        """
+        candidates = self._find_enek5130_hid_candidates()
+        if self.enek5130_hid_device and self.enek5130_hid_device not in candidates:
+            candidates.insert(0, self.enek5130_hid_device)
+
+        if not candidates:
+            log.debug("ENEK5130 HID RGB device not found")
+            return False
+
+        if not all(0 <= value <= 255 for value in [effect, speed, direction]):
+            log.error(f"Invalid ENEK5130 effect fields: effect={effect}, speed={speed}, direction={direction}")
+            return False
+
+        if not (0 <= brightness <= 100):
+            log.error(f"Invalid ENEK5130 brightness. Must be between 0 and 100: {brightness}")
+            return False
+
+        if not all(0 <= color <= 255 for color in [red, green, blue]):
+            log.error(f"Invalid ENEK5130 RGB values. Must be 0-255: {red},{green},{blue}")
+            return False
+
+        if not (0 <= zone_mask <= 0x0F):
+            log.error(f"Invalid ENEK5130 zone mask. Must be 0x00-0x0f: {zone_mask:#x}")
+            return False
+
+        packet = bytes([
+            0xA4, 0x21, effect, brightness,
+            speed, direction,
+            red, green, blue, zone_mask, 0x00
+        ])
+
+        for device in candidates:
+            try:
+                fd = os.open(device, os.O_RDWR | os.O_NONBLOCK)
+                try:
+                    buf = ctypes.create_string_buffer(packet, len(packet))
+                    ret = fcntl.ioctl(fd, HIDIOCSFEATURE(len(packet)), buf, True)
+                    log.info(
+                        "Set ENEK5130 HID RGB via %s report=%s ret=%s",
+                        device,
+                        ' '.join(f'{b:02x}' for b in packet),
+                        ret
+                    )
+                    self.enek5130_hid_device = device
+                    return True
+                finally:
+                    os.close(fd)
+            except Exception as e:
+                log.warning(f"Failed ENEK5130 HID RGB candidate {device}: {e}")
+
+        return False
+
+    def _set_enek5130_zone_color(self, red: int, green: int, blue: int,
+                                  brightness: int, zone_mask: int) -> bool:
+        """Set a static color on one or more ENEK5130 keyboard zones."""
+        return self._set_enek5130_hid_report(0x02, red, green, blue, brightness, 0x00, 0x00, zone_mask)
+
+    def _set_enek5130_static_color(self, red: int, green: int, blue: int, brightness: int,
+                                   speed: int = 0, direction: int = 0) -> bool:
+        """Set static all-zone color using the Acer ENEK5130 HID feature report."""
+        return self._set_enek5130_zone_color(red, green, blue, brightness, 0x0F)
+
+    def _set_enek5130_per_zone_color(self, zones: List[str], brightness: int) -> bool:
+        """Set four ENEK5130 zones using confirmed zone masks 0x01,0x02,0x04,0x08."""
+        zone_masks = [0x01, 0x02, 0x04, 0x08]
+        for zone, zone_mask in zip(zones, zone_masks):
+            red = int(zone[0:2], 16)
+            green = int(zone[2:4], 16)
+            blue = int(zone[4:6], 16)
+            if not self._set_enek5130_zone_color(red, green, blue, brightness, zone_mask):
+                return False
+        return True
+
+    def _set_enek5130_effect(self, mode: int, speed: int, brightness: int,
+                             direction: int, red: int, green: int, blue: int) -> bool:
+        """Set a confirmed ENEK5130 dynamic lighting effect.
+
+        DAMX UI modes:
+        0 Static, 1 Breathing, 2 Neon, 3 Wave, 4 Shifting,
+        5 Zoom, 6 Meteor, 7 Twinkling.
+
+        Confirmed on Acer Nitro ANV16S-41 / ENEK5130:
+        0x04 breathing, 0x05 neon-like, 0x07 sliding,
+        0x09 wave, 0x0a snake/meteor-like, 0x0b random/twinkling-like.
+
+        Unstable/unknown values are deliberately not mapped here:
+        0x01/0x03 black/off, 0x06 short flash/returns to previous,
+        0x08 glitch, 0x0c freezes previous lighting effect.
+        """
+        effect_map = {
+            1: 0x04,  # Breathing Mode
+            2: 0x05,  # Neon Mode
+            3: 0x09,  # Wave Mode
+            4: 0x07,  # Shifting Mode
+            6: 0x0A,  # Meteor Mode (snake-like on ENEK5130)
+            7: 0x0B,  # Twinkling Mode (random on ENEK5130)
+        }
+
+        effect = effect_map.get(mode)
+        if effect is None:
+            return False
+
+        # DAMX currently exposes speed as 0-9. Although ENEK5130 accepts larger
+        # speed bytes for breathing/neon, direct UI values match the app's
+        # expected speed feel better than scaling 0-9 to 0-100.
+        if effect in [0x04, 0x05]:
+            hid_speed = speed
+        else:
+            hid_speed = min(10, max(1, speed + 1))
+
+        return self._set_enek5130_hid_report(
+            effect, red, green, blue, brightness, hid_speed, direction, 0x0F
+        )
 
     def get_thermal_profile(self) -> str:
         """Get current thermal profile"""
@@ -705,6 +889,11 @@ class DAMXManager:
             return False
 
         value = f"{zone1},{zone2},{zone3},{zone4},{brightness}\n"
+
+        if self.enek5130_hid_device:
+            if self._set_enek5130_per_zone_color([zone1, zone2, zone3, zone4], brightness):
+                return True
+
         return self._write_file(
             "/sys/module/linuwu_sense/drivers/platform:acer-wmi/acer-wmi/four_zoned_kb/per_zone_mode",
             value
@@ -753,6 +942,14 @@ class DAMXManager:
             return False
 
         value = f"{mode},{speed},{brightness},{direction},{red},{green},{blue}\n"
+
+        if self.enek5130_hid_device:
+            if mode == 0:
+                if self._set_enek5130_static_color(red, green, blue, brightness):
+                    return True
+            elif self._set_enek5130_effect(mode, speed, brightness, direction, red, green, blue):
+                return True
+
         return self._write_file(
             "/sys/module/linuwu_sense/drivers/platform:acer-wmi/acer-wmi/four_zoned_kb/four_zone_mode",
             value
