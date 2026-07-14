@@ -69,7 +69,7 @@ jobs:
       id: versions
       run: |
         # Detect GUI version
-        GUI_VERSION=$(grep -oP 'private readonly string ProjectVersion\s*=\s*"\K[\d.]+' Div-Acer-Manager-Max/DivAcerManagerMax/MainWindow.axaml.cs || echo "unknown")
+        GUI_VERSION=$(grep -oP 'private const string ProjectVersion\s*=\s*"\K[\d.]+' Div-Acer-Manager-Max/DivAcerManagerMax/MainWindow.axaml.cs || echo "unknown")
         echo "gui_version=$GUI_VERSION" >> $GITHUB_OUTPUT
         
         # Detect daemon version  
@@ -192,6 +192,14 @@ jobs:
         
         chmod +x "${{ env.package_dir }}/setup.sh"
         echo "✓ Setup script updated and made executable"
+        
+        # Copy nitro key detection script alongside setup.sh
+        if [ -f "Div-Acer-Manager-Max/scripts/nitro-key-detection.sh" ]; then
+          cp "Div-Acer-Manager-Max/scripts/nitro-key-detection.sh" "${{ env.package_dir }}/"
+          echo "✓ nitro-key-detection.sh copied"
+        else
+          echo "Warning: nitro-key-detection.sh not found, skipping"
+        fi
     
     - name: Create Release Information
       run: |
@@ -213,6 +221,7 @@ jobs:
         - DAMX-GUI: .NET 9.0 GUI application (self-contained)
         - Linuwu-Sense: Hardware drivers
         - setup.sh: Installation script
+        - nitro-key-detection.sh: Nitro key detection helper script
         EOF
         
         echo "✓ Release information created"
@@ -271,6 +280,7 @@ jobs:
           - **DAMX-GUI**: .NET 9.0 GUI application (self-contained, linux-x64)
           - **Linuwu-Sense**: Hardware drivers (${{ steps.versions.outputs.drivers_type }})
           - **setup.sh**: Installation script
+          - **nitro-key-detection.sh**: Nitro key detection helper script
           
           ## Installation
           1. Download the `${{ env.package_dir }}.tar.xz` file
