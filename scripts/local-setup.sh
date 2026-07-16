@@ -372,11 +372,13 @@ EOL
 }
 
 configure_nitro_button() {
-  echo -e "${YELLOW}Configuring Nitro Button Hardware Code...${NC}"
+  echo -e "${YELLOW}Configuring Nitro/PredatorSense Button Hardware Code...${NC}"
 
-  # Ask user if they want to setup Nitro key with 10 second timeout.
+  # Ask user if they want to setup the key with 10 second timeout.
   # Default to No so installs/updates do not silently add a keyboard hook service.
-  echo -e "${YELLOW}Do you want to setup your Nitro Key? (y/N) - Waiting 10 seconds...${NC}"
+  # Predator machines have the same dedicated button (the PredatorSense key) —
+  # it even sends the same code as the Nitro key on the models tested so far.
+  echo -e "${YELLOW}Do you want to setup your Nitro/PredatorSense Key? (y/N) - Waiting 10 seconds...${NC}"
   read -t 10 -n 1 -r response
   
   # Default to No if timeout or empty response
@@ -387,13 +389,22 @@ configure_nitro_button() {
 
   # Check if user wants to skip
   if [[ ! "$response" =~ ^[Yy]$ ]]; then
-    echo -e "${BLUE}Skipping Nitro button configuration. You can run setup again later to enable it.${NC}"
+    echo -e "${BLUE}Skipping button configuration. You can run setup again later to enable it.${NC}"
     return 0
   fi
 
   if ! command -v evtest &> /dev/null; then
     echo -e "${BLUE}Installing evtest for hardware detection...${NC}"
-    apt-get update && apt-get install -y evtest
+    if command -v apt-get &> /dev/null; then
+      apt-get update && apt-get install -y evtest
+    elif command -v dnf &> /dev/null; then
+      dnf install -y evtest
+    elif command -v pacman &> /dev/null; then
+      pacman -S --noconfirm --needed evtest
+    else
+      echo -e "${RED}Could not install evtest automatically. Install it with your package manager and re-run setup.${NC}"
+      return 1
+    fi
   fi
 
   DEVICE=$(grep -A 5 -B 5 "AT Translated Set 2 keyboard" /proc/bus/input/devices | grep -m 1 "event" | sed 's/.*event\([0-9]\+\).*/\/dev\/input\/event\1/')
@@ -407,16 +418,22 @@ configure_nitro_button() {
   fi
 
   echo -e "${GREEN}Keyboard detected at: $DEVICE${NC}"
-  echo -e "${YELLOW}>>> PLEASE PRESS YOUR NITRO (N) BUTTON NOW (Waiting 30 seconds)... <<<${NC}"
+  echo -e "${YELLOW}>>> PLEASE PRESS YOUR NITRO / PREDATORSENSE BUTTON NOW (Waiting 30 seconds)... <<<${NC}"
 
-  # NitroButton code 
+  # On both Nitro and Predator EC keyboards the button arrives as scancode
+  # 0xf5, which the kernel maps to keycode 425 unless an hwdb quirk remaps
+  # it (some models get prog1/148). Capturing beats hardcoding either one.
   CAPTURED_CODE=$(timeout 30 evtest "$DEVICE" | grep -m 1 "type 1 (EV_KEY).*value 1" | sed -n 's/.*code \([0-9]*\).*/\1/p')
 
   if [ -n "$CAPTURED_CODE" ]; then
-    echo -e "${GREEN}Success! Nitro button code captured: ${CAPTURED_CODE}${NC}"
+    echo -e "${GREEN}Success! Button code captured: ${CAPTURED_CODE}${NC}"
     echo "NITRO_KEY=$CAPTURED_CODE" > /etc/damx/nitro_key.conf
   else
     echo -e "${RED}Timeout or no key detected. Falling back to default code (425).${NC}"
+    echo -e "${YELLOW}If you DID press the button: key remappers like keyd or kmonad grab the${NC}"
+    echo -e "${YELLOW}keyboard exclusively, so this capture (and the detection service) never${NC}"
+    echo -e "${YELLOW}sees the key. Stop the remapper and re-run setup, or bind the key in the${NC}"
+    echo -e "${YELLOW}remapper's own config instead.${NC}"
     echo "NITRO_KEY=425" > /etc/damx/nitro_key.conf
   fi
   
@@ -458,7 +475,7 @@ install_nitro_service() {
     return 1
   fi
 
-  echo -e "${BLUE}Nitro key will launch DAMX for user: ${TARGET_USER}${NC}"
+  echo -e "${BLUE}The button will launch DAMX for user: ${TARGET_USER}${NC}"
   
   # Check if NitroKeyDetection.sh exists
   if [ ! -f "$NITRO_SCRIPT" ]; then
@@ -476,7 +493,7 @@ install_nitro_service() {
   # Create systemd service file
   cat > /etc/systemd/system/nitro-key-detection.service << EOF
 [Unit]
-Description=Nitro Key Detection Service
+Description=Nitro/PredatorSense Key Detection Service
 After=multi-user.target
 After=network.target
 
