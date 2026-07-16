@@ -374,21 +374,20 @@ EOL
 configure_nitro_button() {
   echo -e "${YELLOW}Configuring Nitro Button Hardware Code...${NC}"
 
-  # Ask user if they want to setup Nitro key with 10 second timeout
-  echo -e "${YELLOW}Do you want to Setup your Nitro Key? (Y/n) - Waiting 10 seconds...${NC}"
+  # Ask user if they want to setup Nitro key with 10 second timeout.
+  # Default to No so installs/updates do not silently add a keyboard hook service.
+  echo -e "${YELLOW}Do you want to setup your Nitro Key? (y/N) - Waiting 10 seconds...${NC}"
   read -t 10 -n 1 -r response
   
-  # Default to Yes if timeout or empty response
+  # Default to No if timeout or empty response
   if [[ $? -ne 0 ]] || [[ -z "$response" ]]; then
-    echo -e "\n${BLUE}No response detected. Proceeding with Nitro setup...${NC}"
-    response="Y"
+    echo -e "\n${BLUE}No response detected. Skipping Nitro button setup.${NC}"
+    response="N"
   fi
 
   # Check if user wants to skip
   if [[ ! "$response" =~ ^[Yy]$ ]]; then
-    echo -e "${BLUE}Skipping Nitro button configuration. Using default code (425).${NC}"
-    mkdir -p /etc/damx
-    echo "NITRO_KEY=425" > /etc/damx/nitro_key.conf
+    echo -e "${BLUE}Skipping Nitro button configuration. You can run setup again later to enable it.${NC}"
     return 0
   fi
 
@@ -425,6 +424,24 @@ configure_nitro_button() {
   install_nitro_service
 }
 
+detect_desktop_user() {
+  if [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != "root" ] && id -u "$SUDO_USER" >/dev/null 2>&1; then
+    echo "$SUDO_USER"
+    return 0
+  fi
+
+  if command -v loginctl >/dev/null 2>&1; then
+    local session_user
+    session_user=$(loginctl list-sessions --no-legend 2>/dev/null | awk '$3 != "root" && $3 != "gdm" { print $3; exit }')
+    if [ -n "$session_user" ] && id -u "$session_user" >/dev/null 2>&1; then
+      echo "$session_user"
+      return 0
+    fi
+  fi
+
+  awk -F: '$3 >= 1000 && $3 < 60000 && $1 != "nobody" { print $1; exit }' /etc/passwd
+}
+
 install_nitro_service() {
   echo -e "${YELLOW}Installing Nitro Key Detection Service...${NC}"
   
@@ -434,6 +451,14 @@ install_nitro_service() {
   # Get the directory where the main script is located
   SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   NITRO_SCRIPT="$SCRIPT_DIR/nitro-key-detection.sh"
+  TARGET_USER=$(detect_desktop_user)
+
+  if [ -z "$TARGET_USER" ] || ! id -u "$TARGET_USER" >/dev/null 2>&1; then
+    echo -e "${RED}Error: Could not determine desktop user for Nitro key launcher.${NC}"
+    return 1
+  fi
+
+  echo -e "${BLUE}Nitro key will launch DAMX for user: ${TARGET_USER}${NC}"
   
   # Check if NitroKeyDetection.sh exists
   if [ ! -f "$NITRO_SCRIPT" ]; then
@@ -463,6 +488,7 @@ RestartSec=10
 StandardOutput=journal
 StandardError=journal
 User=root
+Environment=DAMX_TARGET_USER=${TARGET_USER}
 
 [Install]
 WantedBy=multi-user.target
