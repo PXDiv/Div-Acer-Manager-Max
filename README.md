@@ -64,7 +64,7 @@ Check your device's compatibility here: [Compatibility List](https://github.com/
 
 ## 🖥️ DAMX Installation Guide
 
-1. Download the latest release from the **Releases** section.
+1. Download the latest release from the **[Releases](https://github.com/PXDiv/Div-Acer-Manager-Max/releases)** section.
 
 2. Extract the downloaded package.
 
