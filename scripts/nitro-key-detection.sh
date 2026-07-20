@@ -100,7 +100,7 @@ export XAUTHORITY
 export XDG_RUNTIME_DIR="/run/user/$USER_ID"
 export DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$USER_ID/bus"
 
-echo "Monitoring Nitro button (code $NITRO_KEY) on $DEVICE for user $TARGET_USER..."
+echo "Monitoring Nitro/PredatorSense button (code $NITRO_KEY) on $DEVICE for user $TARGET_USER..."
 echo "Using DISPLAY=$DISPLAY WAYLAND_DISPLAY=$WAYLAND_DISPLAY XAUTHORITY=$XAUTHORITY"
 
 evtest "$DEVICE" | grep --line-buffered "code $NITRO_KEY.*value 1" | while read -r _line; do

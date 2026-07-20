@@ -114,6 +114,22 @@ If the remote installation fails for some reason or you've gone offline, follow 
 
 ✅ That’s it—you’re all set!
 
+## 🔘 Nitro / PredatorSense Button
+
+During setup you can bind your laptop's dedicated button (the **N** key on
+Nitros, the **PredatorSense** key on Predators) to open DAMX. Both are the
+same button as far as the EC is concerned — it sends scancode `0xf5`, which
+the kernel maps to keycode `425` on most models. Some models carry a udev
+hwdb quirk that remaps it to `prog1` (`148`) instead, which is why setup
+captures the code from an actual press rather than assuming one.
+
+Confirmed so far: Nitro ANV16S-41, Predator PHN16S-71 (both `425`).
+
+**Note for keyd/kmonad users:** key remappers grab the keyboard exclusively,
+so the detection service never sees the button. Bind the key in the
+remapper's config instead (after keyd it typically surfaces as `f16` /
+`XF86Launch7`).
+
 ## 🖥️ Troubleshooting
 
 You can check the logs at /var/log/DAMX_Daemon_Log.log
