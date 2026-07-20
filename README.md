@@ -64,26 +64,6 @@ Check your device's compatibility here: [Compatibility List](https://github.com/
 
 ## 🖥️ DAMX Installation Guide
 
-You can install DAMX using either of the following methods:
-
-### 🔗 Remote Installation
-
-1. Open a terminal window.
-
-2. Run the following command:
-
-   ```bash
-   curl -fsSL https://raw.githubusercontent.com/PXDiv/Div-Acer-Manager-Max/refs/heads/main/scripts/remoteSetup.sh -o /tmp/setup.sh && sudo bash /tmp/setup.sh
-   ```
-
-3. Follow the on-screen prompts.
-
-4. Done!
-
-### 📦 Local Installation (Alternative Method)
-
-If the remote installation fails for some reason or you've gone offline, follow these steps:
-
 1. Download the latest release from the **Releases** section.
 
 2. Extract the downloaded package.
