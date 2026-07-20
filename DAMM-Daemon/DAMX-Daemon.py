@@ -654,8 +654,8 @@ class DAMXManager:
         5 Zoom, 6 Meteor, 7 Twinkling.
 
         Confirmed on Acer Nitro ANV16S-41 / ENEK5130:
-        0x04 breathing, 0x05 neon-like, 0x07 sliding,
-        0x09 wave, 0x0a snake/meteor-like, 0x0b random/twinkling-like.
+        0x04 breathing, 0x05 neon-like, 0x07 wave/shifting,
+        0x09 zoom, 0x0a snake/meteor-like, 0x0b random/twinkling-like.
 
         Unstable/unknown values are deliberately not mapped here:
         0x01/0x03 black/off, 0x06 short flash/returns to previous,
@@ -664,8 +664,9 @@ class DAMXManager:
         effect_map = {
             1: 0x04,  # Breathing Mode
             2: 0x05,  # Neon Mode
-            3: 0x09,  # Wave Mode
-            4: 0x07,  # Shifting Mode
+            3: 0x07,  # Wave Mode
+            4: 0x07,  # Shifting Mode (same confirmed native wave/shifting effect)
+            5: 0x09,  # Zoom Mode
             6: 0x0A,  # Meteor Mode (snake-like on ENEK5130)
             7: 0x0B,  # Twinkling Mode (random on ENEK5130)
         }
