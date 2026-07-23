@@ -174,14 +174,8 @@ jobs:
         elif [ -f "scripts/local-setup.sh" ]; then
           cp "scripts/local-setup.sh" "${{ env.package_dir }}/setup.sh"
         else
-          echo "Warning: local-setup.sh not found, creating a basic one"
-          cat > "${{ env.package_dir }}/setup.sh" << 'EOF'
-        #!/bin/bash
-        # DAMX Installation Script
-        echo "DAMX Installation"
-        echo "=================="
-        echo "Please run the installation manually or provide a proper setup.sh script"
-        EOF
+          echo "Error: local-setup.sh not found"
+          exit 1
         fi
         
         # Update version information in setup script
@@ -200,6 +194,18 @@ jobs:
         else
           echo "Warning: nitro-key-detection.sh not found, skipping"
         fi
+
+    - name: Validate Packaged Installer
+      run: |
+        SETUP_SCRIPT="${{ env.package_dir }}/setup.sh"
+        bash -n "$SETUP_SCRIPT"
+
+        if ! grep -Eq '^is_llvm_kernel\(\)[[:space:]]*\{' "$SETUP_SCRIPT"; then
+          echo "Error: setup.sh is missing is_llvm_kernel()"
+          exit 1
+        fi
+
+        echo "✓ Packaged installer validation passed"
     
     - name: Create Release Information
       run: |
