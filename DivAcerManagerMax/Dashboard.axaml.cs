@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Runtime.CompilerServices;
@@ -715,50 +716,30 @@ public partial class Dashboard : UserControl, INotifyPropertyChanged
     {
         try
         {
-            // Check for multiple temperature files from hwmon6
-            if (_systemInfoPaths.ContainsKey("cpu_temp_files"))
+            if (_systemInfoPaths.TryGetValue("cpu_temp", out var cpuTempPath) &&
+                TryReadMillidegreeTemperature(cpuTempPath, out var tempC))
+                return Math.Round(tempC, 1);
+
+            cpuTempPath = FindCpuTemperaturePath();
+            if (cpuTempPath != null)
             {
-                var tempFiles = _systemInfoPaths["cpu_temp_files"].Split(',');
-                if (tempFiles.Length > 0)
-                {
-                    double tempSum = 0;
-                    var validReadings = 0;
-
-                    foreach (var tempFile in tempFiles)
-                        if (File.Exists(tempFile))
-                        {
-                            var temperatureStr = File.ReadAllText(tempFile).Trim();
-                            if (int.TryParse(temperatureStr, out var tempValue))
-                            {
-                                // Temperature is often reported in millidegrees C
-                                tempSum += tempValue / 1000.0;
-                                validReadings++;
-                            }
-                        }
-
-                    if (validReadings > 0)
-                        // Calculate average temperature
-                        return Math.Round(tempSum / validReadings, 1);
-                }
-            }
-
-            // Fallback to single temperature file if available
-            if (_systemInfoPaths.ContainsKey("cpu_temp") && File.Exists(_systemInfoPaths["cpu_temp"]))
-            {
-                var temperatureStr = File.ReadAllText(_systemInfoPaths["cpu_temp"]).Trim();
-                if (int.TryParse(temperatureStr, out var tempValue))
-                {
-                    // Temperature is often reported in millidegrees C
-                    var tempC = tempValue / 1000.0;
+                _systemInfoPaths["cpu_temp"] = cpuTempPath;
+                if (TryReadMillidegreeTemperature(cpuTempPath, out tempC))
                     return Math.Round(tempC, 1);
-                }
             }
 
             // Fallback to lm-sensors if available
             var output = RunCommand("sensors", "");
-            var match = Regex.Match(output, @"Package id \d+:\s+\+?(\d+\.\d+)°C");
+            var match = Regex.Match(output, @"Package id \d+:\s+\+?(\d+(?:\.\d+)?)°C");
             if (match.Success)
-                if (double.TryParse(match.Groups[1].Value, out var tempC))
+                if (double.TryParse(match.Groups[1].Value, NumberStyles.Float, CultureInfo.InvariantCulture,
+                        out tempC))
+                    return Math.Round(tempC, 1);
+
+            match = Regex.Match(output, @"(?:Tctl|Tdie):\s+\+?(\d+(?:\.\d+)?)°C");
+            if (match.Success)
+                if (double.TryParse(match.Groups[1].Value, NumberStyles.Float, CultureInfo.InvariantCulture,
+                        out tempC))
                     return Math.Round(tempC, 1);
 
             // Couldn't get temperature
@@ -769,6 +750,79 @@ public partial class Dashboard : UserControl, INotifyPropertyChanged
             Console.WriteLine($"Error getting CPU temperature: {ex.Message}");
             return 0;
         }
+    }
+
+    private static bool TryReadMillidegreeTemperature(string path, out double temperatureC)
+    {
+        temperatureC = 0;
+
+        if (!File.Exists(path))
+            return false;
+
+        var temperatureStr = File.ReadAllText(path).Trim();
+        if (!int.TryParse(temperatureStr, out var tempValue))
+            return false;
+
+        temperatureC = tempValue / 1000.0;
+        return true;
+    }
+
+    private static string? FindCpuTemperaturePath()
+    {
+        var intelPackagePath = FindHwmonTemperaturePath(
+            "coretemp",
+            label => Regex.IsMatch(label, @"^Package id \d+$", RegexOptions.IgnoreCase));
+        if (intelPackagePath != null)
+            return intelPackagePath;
+
+        var amdPackagePath = FindHwmonTemperaturePath(
+            "k10temp",
+            label => string.Equals(label, "Tctl", StringComparison.OrdinalIgnoreCase) ||
+                     string.Equals(label, "Tdie", StringComparison.OrdinalIgnoreCase));
+        if (amdPackagePath != null)
+            return amdPackagePath;
+
+        return FindHwmonTemperaturePath(
+            "zenpower",
+            label => string.Equals(label, "Tctl", StringComparison.OrdinalIgnoreCase) ||
+                     string.Equals(label, "Tdie", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static string? FindHwmonTemperaturePath(string hwmonName, Func<string, bool> labelMatches)
+    {
+        const string hwmonRoot = "/sys/class/hwmon";
+        if (!Directory.Exists(hwmonRoot))
+            return null;
+
+        foreach (var hwmonDir in Directory.GetDirectories(hwmonRoot).OrderBy(path => path))
+        {
+            var nameFile = Path.Combine(hwmonDir, "name");
+            if (!File.Exists(nameFile))
+                continue;
+
+            var name = File.ReadAllText(nameFile).Trim();
+            if (!string.Equals(name, hwmonName, StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            foreach (var labelFile in Directory.GetFiles(hwmonDir, "temp*_label").OrderBy(path => path))
+            {
+                var label = File.ReadAllText(labelFile).Trim();
+                if (!labelMatches(label))
+                    continue;
+
+                var inputFile = Path.Combine(
+                    hwmonDir,
+                    Path.GetFileName(labelFile).Replace("_label", "_input", StringComparison.Ordinal));
+                if (File.Exists(inputFile))
+                    return inputFile;
+            }
+
+            var temp1Input = Path.Combine(hwmonDir, "temp1_input");
+            if (File.Exists(temp1Input))
+                return temp1Input;
+        }
+
+        return null;
     }
 
     private double GetRamUsage()
@@ -930,49 +984,16 @@ public partial class Dashboard : UserControl, INotifyPropertyChanged
     {
         try
         {
-            // First check for hwmon6 directory and collect all temp input files
-            string[] hwmonPaths =
-            [
-                "/sys/class/hwmon/hwmon5", "/sys/class/hwmon/hwmon6", "/sys/class/hwmon/hwmon7",
-                "/sys/class/hwmon/hwmon8"
-            ];
-            foreach (var hwmonPath in hwmonPaths)
-                if (Directory.Exists(hwmonPath))
-                {
-                    var tempFiles = Directory.GetFiles(hwmonPath, "temp*_input");
-                    if (tempFiles.Length > 3)
-                    {
-                        // Store all temperature files in a list
-                        _systemInfoPaths["cpu_temp_files"] = string.Join(",", tempFiles);
-                        Console.WriteLine(
-                            $"Found CPU Reporting Temps at {_systemInfoPaths["cpu_temp_files"].Split(',').Length} Cores, using their Avg ({hwmonPath})");
-                        return;
-                    }
-                }
-
-            // Fallback to other possible paths if hwmon6 doesn't have temperature files
-            string[] possibleCpuTempPaths =
+            var cpuTempPath = FindCpuTemperaturePath();
+            if (cpuTempPath != null)
             {
-                "/sys/class/hwmon/hwmon1/temp1_input",
-                "/sys/class/thermal/thermal_zone0/temp",
-                "/sys/devices/platform/coretemp.0/hwmon/hwmon1/temp1_input"
-            };
-
-
-            foreach (var pathPattern in possibleCpuTempPaths)
-                if (Directory.Exists(Path.GetDirectoryName(pathPattern) ?? string.Empty))
-                {
-                    var files = Directory.GetFiles(Path.GetDirectoryName(pathPattern) ?? string.Empty,
-                        Path.GetFileName(pathPattern));
-                    if (files.Length > 0)
-                    {
-                        _systemInfoPaths["cpu_temp"] = files[0];
-                        break;
-                    }
-                }
-
-            Console.WriteLine(
-                $"Found CPU Reporting Temp at {_systemInfoPaths["cpu_temp"].Split(',').Length} Core");
+                _systemInfoPaths["cpu_temp"] = cpuTempPath;
+                Console.WriteLine($"Found CPU package temperature at {cpuTempPath}");
+            }
+            else
+            {
+                Console.WriteLine("CPU package temperature hwmon sensor not found; sensors fallback will be used");
+            }
 
             // Find fan speed paths
             FindFanSpeedPaths();
