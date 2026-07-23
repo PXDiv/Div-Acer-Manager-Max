@@ -212,6 +212,45 @@ cleanup_nitro_service() {
   echo -e "${GREEN}Nitro Key Detection Service cleanup completed.${NC}"
 }
 
+# Detect the compiler used to build the running kernel.
+is_llvm_kernel() {
+  local kernel_release
+  local kernel_build
+  local config_file
+
+  kernel_release=$(uname -r)
+  kernel_build="/lib/modules/${kernel_release}/build"
+
+  for config_file in "/boot/config-${kernel_release}" "${kernel_build}/.config"; do
+    if [ -r "$config_file" ] && grep -q '^CONFIG_CC_IS_CLANG=y' "$config_file"; then
+      return 0
+    fi
+  done
+
+  if command -v zgrep &> /dev/null &&
+     [ -r /proc/config.gz ] &&
+     zgrep -q '^CONFIG_CC_IS_CLANG=y' /proc/config.gz; then
+    return 0
+  fi
+
+  if grep -qsiE 'clang|llvm' /proc/version 2>/dev/null; then
+    return 0
+  fi
+
+  if [ -r "${kernel_build}/include/generated/compile.h" ] &&
+     grep -qsiE 'clang|llvm' "${kernel_build}/include/generated/compile.h"; then
+    return 0
+  fi
+
+  # CachyOS kernels are LLVM-built by default. Keep this fallback for
+  # installations where the running kernel does not expose its build config.
+  if [ -r /etc/os-release ] && grep -qi 'cachyos' /etc/os-release; then
+    return 0
+  fi
+
+  return 1
+}
+
 # Install build dependencies based on distribution
 install_build_deps() {
   if command -v pacman &> /dev/null; then
@@ -230,6 +269,8 @@ install_build_deps() {
 }
 
 install_drivers() {
+  local build_args=()
+
   echo -e "${YELLOW}Installing Linuwu-Sense drivers...${NC}"
 
   if [ ! -d "Linuwu-Sense" ]; then
@@ -244,33 +285,41 @@ install_drivers() {
   # Install required build dependencies
   if ! command -v make &> /dev/null; then
     echo -e "${YELLOW}Installing build tools...${NC}"
-    install_build_deps
+    install_build_deps || {
+      cd ..
+      return 1
+    }
   fi
 
   # Build driver with appropriate compiler flags
-  # LLVM-compiled kernels (CachyOS, etc.) require matching compiler
   if is_llvm_kernel; then
     echo -e "${YELLOW}Detected LLVM-compiled kernel, using Clang...${NC}"
-    install_build_deps  # Ensure clang is installed
-    make clean LLVM=1 CC=clang
-    make LLVM=1 CC=clang
-    make install LLVM=1 CC=clang
-  else
-    make clean
-    make
-    make install
+    if ! command -v clang &> /dev/null; then
+      install_build_deps || {
+        cd ..
+        return 1
+      }
+    fi
+    build_args=(LLVM=1 CC=clang)
   fi
 
-  if [ $? -eq 0 ]; then
-    echo -e "${GREEN}Linuwu-Sense drivers installed successfully!${NC}"
+  if ! make clean "${build_args[@]}" || ! make "${build_args[@]}"; then
+    echo -e "${RED}Error: Failed to build Linuwu-Sense drivers${NC}"
     cd ..
-    return 0
-  else
+    pause
+    return 1
+  fi
+
+  if ! make install "${build_args[@]}"; then
     echo -e "${RED}Error: Failed to install Linuwu-Sense drivers${NC}"
     cd ..
     pause
     return 1
   fi
+
+  echo -e "${GREEN}Linuwu-Sense drivers installed successfully!${NC}"
+  cd ..
+  return 0
 }
 
 install_daemon() {
@@ -558,6 +607,10 @@ perform_install() {
   if [ "$skip_drivers" = false ]; then
     install_drivers
     DRIVER_RESULT=$?
+    if [ $DRIVER_RESULT -ne 0 ]; then
+      echo -e "${RED}Driver installation failed; daemon and GUI installation were not attempted.${NC}"
+      return $DRIVER_RESULT
+    fi
   else
     echo -e "${YELLOW}Skipping driver installation as requested.${NC}"
     DRIVER_RESULT=0
