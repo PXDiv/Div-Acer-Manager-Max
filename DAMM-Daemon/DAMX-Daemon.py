@@ -1588,9 +1588,8 @@ class DAMXDaemon:
             #     log.error("Failed to start keyboard monitoring")
             #     # Don't return False here - continue with reduced functionality
 
-            # Initialize power monitor
+            # Initialize power monitor (started in run())
             self.power_monitor = PowerSourceDetector(self.manager)
-            self.power_monitor.start_monitoring()
 
             # Log detected features
             features_str = ", ".join(sorted(self.manager.available_features))
