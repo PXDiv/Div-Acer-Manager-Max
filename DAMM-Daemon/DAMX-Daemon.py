@@ -1575,6 +1575,7 @@ class DAMXDaemon:
         try:
             # Initialize DAMXManager
             self.manager = DAMXManager()
+            log.info(f"Driver Version: {self.manager.get_driver_version()}")
 
             # Initialize keyboard monitor early
             # self.keyboard_monitor = KeyboardMonitor(
@@ -1688,8 +1689,6 @@ def signal_handler(self, sig, frame):
 def main():
     """Main function"""
     args = parse_args()
-    
-    log.info(f"Driver Version: {DAMXManager().get_driver_version()}")
 
     # Set log level based on verbosity
     if args.verbose:
