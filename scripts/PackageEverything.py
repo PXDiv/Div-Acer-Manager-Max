@@ -372,7 +372,40 @@ class DAMXBuilder:
         
         # Make setup script executable
         setup_target.chmod(0o755)
+        self.validate_setup_script(setup_target)
         print("✓ Setup script updated and made executable")
+
+    def validate_setup_script(self, setup_target):
+        """Fail packaging if critical installer functions were dropped."""
+        content = setup_target.read_text()
+        required_functions = [
+            "is_llvm_kernel",
+            "prepare_secure_boot_signing",
+            "sign_driver_module",
+        ]
+        missing_functions = [
+            name for name in required_functions
+            if f"{name}() {{" not in content
+        ]
+
+        if missing_functions:
+            print(
+                "Error: setup.sh is missing required functions: "
+                + ", ".join(missing_functions)
+            )
+            sys.exit(1)
+
+        try:
+            subprocess.run(
+                ["bash", "-n", str(setup_target)],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+        except subprocess.CalledProcessError as e:
+            print("Error: generated setup.sh failed Bash syntax validation")
+            print(e.stderr)
+            sys.exit(1)
     
     def create_release_info(self, package_dir, versions):
         """Create release information file"""

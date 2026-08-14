@@ -12,6 +12,10 @@ SYSTEMD_DIR="/etc/systemd/system"
 DAEMON_SERVICE_NAME="damx-daemon.service"
 DESKTOP_FILE_DIR="/usr/share/applications"
 ICON_DIR="/usr/share/icons/hicolor/256x256/apps"
+MODULE_SIGNING_DIR="/var/lib/damx/secureboot"
+MODULE_SIGNING_KEY="${MODULE_SIGNING_DIR}/DAMX-MOK.priv"
+MODULE_SIGNING_CERT="${MODULE_SIGNING_DIR}/DAMX-MOK.der"
+MODULE_SIGNING_REQUIRED=false
 
 # Legacy paths for cleanup (uppercase naming convention)
 LEGACY_INSTALL_DIR="/opt/DAMX"
@@ -251,6 +255,165 @@ is_llvm_kernel() {
   return 1
 }
 
+secure_boot_enabled() {
+  local secure_boot_state
+  local secure_boot_value
+  local secure_boot_var
+
+  if [ -r /sys/module/module/parameters/sig_enforce ] &&
+     grep -qiE '^(1|y|yes)$' /sys/module/module/parameters/sig_enforce; then
+    return 0
+  fi
+
+  if command -v mokutil &> /dev/null; then
+    secure_boot_state=$(mokutil --sb-state 2>/dev/null || true)
+    if echo "$secure_boot_state" | grep -qi 'SecureBoot enabled'; then
+      return 0
+    fi
+    if echo "$secure_boot_state" | grep -qi 'SecureBoot disabled'; then
+      return 1
+    fi
+  fi
+
+  for secure_boot_var in /sys/firmware/efi/efivars/SecureBoot-*; do
+    [ -r "$secure_boot_var" ] || continue
+    secure_boot_value=$(od -An -j4 -N1 -t u1 "$secure_boot_var" 2>/dev/null | tr -d ' ')
+    if [ "$secure_boot_value" = "1" ]; then
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+install_secure_boot_deps() {
+  if command -v pacman &> /dev/null; then
+    pacman -S --needed --noconfirm mokutil openssl
+  elif command -v apt-get &> /dev/null; then
+    apt-get update && apt-get install -y mokutil openssl
+  elif command -v dnf &> /dev/null; then
+    dnf install -y mokutil openssl
+  elif command -v yum &> /dev/null; then
+    yum install -y mokutil openssl
+  elif command -v zypper &> /dev/null; then
+    zypper install -y mokutil openssl
+  else
+    echo -e "${RED}Error: Install mokutil and openssl before continuing.${NC}"
+    return 1
+  fi
+}
+
+prepare_secure_boot_signing() {
+  local key_check_output
+
+  MODULE_SIGNING_REQUIRED=false
+  if ! secure_boot_enabled; then
+    return 0
+  fi
+
+  MODULE_SIGNING_REQUIRED=true
+  echo -e "${YELLOW}Secure Boot is enabled; the Linuwu-Sense module must be signed.${NC}"
+
+  if ! command -v mokutil &> /dev/null || ! command -v openssl &> /dev/null; then
+    echo -e "${YELLOW}Installing Secure Boot signing tools...${NC}"
+    install_secure_boot_deps || return 1
+  fi
+
+  install -d -m 700 "$MODULE_SIGNING_DIR" || return 1
+
+  if [ ! -s "$MODULE_SIGNING_KEY" ] || [ ! -s "$MODULE_SIGNING_CERT" ]; then
+    echo -e "${YELLOW}Generating a DAMX Machine Owner Key...${NC}"
+    (
+      umask 077
+      openssl req -new -x509 -newkey rsa:4096 \
+        -keyout "${MODULE_SIGNING_KEY}.new" \
+        -addext "extendedKeyUsage=codeSigning" \
+        -outform DER \
+        -out "${MODULE_SIGNING_CERT}.new" \
+        -nodes \
+        -days 36500 \
+        -subj "/CN=DAMX Linuwu-Sense Module Signing/"
+    ) || return 1
+    mv -f "${MODULE_SIGNING_KEY}.new" "$MODULE_SIGNING_KEY"
+    mv -f "${MODULE_SIGNING_CERT}.new" "$MODULE_SIGNING_CERT"
+    chmod 600 "$MODULE_SIGNING_KEY"
+    chmod 644 "$MODULE_SIGNING_CERT"
+  fi
+
+  key_check_output=$(LC_ALL=C mokutil --test-key "$MODULE_SIGNING_CERT" 2>&1 || true)
+  case "$key_check_output" in
+    *"is already enrolled"*|*"is already in db"*|*"built-in trusted keyring"*)
+      echo -e "${GREEN}DAMX module-signing key is enrolled.${NC}"
+      return 0
+      ;;
+    *"already in the enrollment request"*)
+      echo -e "${YELLOW}DAMX MOK enrollment is already pending.${NC}"
+      echo -e "${YELLOW}Reboot, complete enrollment in MOK Manager, then run this installer again.${NC}"
+      return 2
+      ;;
+    *"blocked"*)
+      echo -e "${RED}Error: The DAMX module-signing key is blocked by Secure Boot policy.${NC}"
+      return 1
+      ;;
+    *"is not enrolled"*)
+      ;;
+    *)
+      echo -e "${RED}Error: Could not determine whether the DAMX signing key is enrolled.${NC}"
+      echo "$key_check_output"
+      return 1
+      ;;
+  esac
+
+  if [ ! -t 0 ]; then
+    echo -e "${RED}Error: MOK enrollment requires an interactive terminal.${NC}"
+    echo "Run setup.sh directly from a terminal, then reboot and enroll the DAMX key."
+    return 1
+  fi
+
+  echo -e "${YELLOW}The DAMX signing key must be enrolled before the driver can load.${NC}"
+  echo "You will be asked for a one-time password. After rebooting, choose:"
+  echo "  Enroll MOK -> Continue -> Yes"
+  echo "Then enter the same password and reboot once more."
+  if ! mokutil --import "$MODULE_SIGNING_CERT"; then
+    echo -e "${RED}Error: Failed to schedule DAMX MOK enrollment.${NC}"
+    return 1
+  fi
+
+  echo -e "${YELLOW}MOK enrollment has been scheduled.${NC}"
+  echo -e "${YELLOW}Reboot, complete enrollment, then run this installer again.${NC}"
+  return 2
+}
+
+sign_driver_module() {
+  local module_path=$1
+  local sign_file
+  local signer
+
+  sign_file="/lib/modules/$(uname -r)/build/scripts/sign-file"
+
+  if [ ! -x "$sign_file" ]; then
+    echo -e "${RED}Error: Kernel signing tool not found at ${sign_file}.${NC}"
+    return 1
+  fi
+  if [ ! -f "$module_path" ]; then
+    echo -e "${RED}Error: Built module not found at ${module_path}.${NC}"
+    return 1
+  fi
+
+  echo -e "${YELLOW}Signing Linuwu-Sense for Secure Boot...${NC}"
+  "$sign_file" sha256 "$MODULE_SIGNING_KEY" "$MODULE_SIGNING_CERT" "$module_path" ||
+    return 1
+
+  if command -v modinfo &> /dev/null; then
+    signer=$(modinfo -F signer "$module_path" 2>/dev/null || true)
+    if [ -z "$signer" ]; then
+      echo -e "${RED}Error: The built module does not contain a verifiable signature.${NC}"
+      return 1
+    fi
+    echo -e "${GREEN}Module signed by: ${signer}${NC}"
+  fi
+}
+
 # Install build dependencies based on distribution
 install_build_deps() {
   if command -v pacman &> /dev/null; then
@@ -265,11 +428,15 @@ install_build_deps() {
     dnf install -y gcc make kernel-devel
   elif command -v zypper &> /dev/null; then
     zypper install -y gcc make kernel-devel
+  else
+    echo -e "${RED}Error: Could not detect a supported package manager.${NC}"
+    return 1
   fi
 }
 
 install_drivers() {
   local build_args=()
+  local signing_status
 
   echo -e "${YELLOW}Installing Linuwu-Sense drivers...${NC}"
 
@@ -280,15 +447,24 @@ install_drivers() {
     return 1
   fi
 
-  cd Linuwu-Sense
+  cd Linuwu-Sense || return 1
 
   # Install required build dependencies
   if ! command -v make &> /dev/null; then
     echo -e "${YELLOW}Installing build tools...${NC}"
     install_build_deps || {
-      cd ..
+      cd .. || return 1
       return 1
     }
+  fi
+
+  if [ "$MODULE_SIGNING_REQUIRED" != true ]; then
+    prepare_secure_boot_signing
+    signing_status=$?
+    if [ $signing_status -ne 0 ]; then
+      cd .. || return 1
+      return $signing_status
+    fi
   fi
 
   # Build driver with appropriate compiler flags
@@ -296,7 +472,7 @@ install_drivers() {
     echo -e "${YELLOW}Detected LLVM-compiled kernel, using Clang...${NC}"
     if ! command -v clang &> /dev/null; then
       install_build_deps || {
-        cd ..
+        cd .. || return 1
         return 1
       }
     fi
@@ -305,20 +481,28 @@ install_drivers() {
 
   if ! make clean "${build_args[@]}" || ! make "${build_args[@]}"; then
     echo -e "${RED}Error: Failed to build Linuwu-Sense drivers${NC}"
-    cd ..
+    cd .. || return 1
+    pause
+    return 1
+  fi
+
+  if [ "$MODULE_SIGNING_REQUIRED" = true ] &&
+     ! sign_driver_module "src/linuwu_sense.ko"; then
+    echo -e "${RED}Error: Failed to sign Linuwu-Sense for Secure Boot${NC}"
+    cd .. || return 1
     pause
     return 1
   fi
 
   if ! make install "${build_args[@]}"; then
     echo -e "${RED}Error: Failed to install Linuwu-Sense drivers${NC}"
-    cd ..
+    cd .. || return 1
     pause
     return 1
   fi
 
   echo -e "${GREEN}Linuwu-Sense drivers installed successfully!${NC}"
-  cd ..
+  cd .. || return 1
   return 0
 }
 
@@ -588,6 +772,20 @@ EOF
 perform_install() {
   local skip_drivers=$1
   local is_update=$2
+  local signing_status
+
+  # Do this before cleanup so a pending MOK enrollment never removes an
+  # otherwise working installation.
+  if [ "$skip_drivers" = false ]; then
+    prepare_secure_boot_signing
+    signing_status=$?
+    if [ $signing_status -ne 0 ]; then
+      if [ $signing_status -eq 2 ]; then
+        pause
+      fi
+      return $signing_status
+    fi
+  fi
 
   # If this is an update/reinstall, perform cleanup first
   if [ "$is_update" = true ]; then
@@ -698,6 +896,9 @@ main_menu() {
         print_banner
         echo -e "${BLUE}Starting complete installation...${NC}"
         perform_install false false
+        if [ $? -eq 2 ]; then
+          exit 2
+        fi
         ;;
       2)
         print_banner
@@ -714,6 +915,9 @@ main_menu() {
         echo -e "${BLUE}Starting reinstallation/update...${NC}"
         echo -e "${YELLOW}This will completely remove the existing installation before installing the new version.${NC}"
         perform_install false true
+        if [ $? -eq 2 ]; then
+          exit 2
+        fi
         ;;
       5)
         print_banner

@@ -200,10 +200,16 @@ jobs:
         SETUP_SCRIPT="${{ env.package_dir }}/setup.sh"
         bash -n "$SETUP_SCRIPT"
 
-        if ! grep -Eq '^is_llvm_kernel\(\)[[:space:]]*\{' "$SETUP_SCRIPT"; then
-          echo "Error: setup.sh is missing is_llvm_kernel()"
-          exit 1
-        fi
+        for function_name in \
+          is_llvm_kernel \
+          prepare_secure_boot_signing \
+          sign_driver_module
+        do
+          if ! grep -Eq "^${function_name}\\(\\)[[:space:]]*\\{" "$SETUP_SCRIPT"; then
+            echo "Error: setup.sh is missing ${function_name}()"
+            exit 1
+          fi
+        done
 
         echo "✓ Packaged installer validation passed"
     
