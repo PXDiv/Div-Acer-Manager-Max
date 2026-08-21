@@ -277,16 +277,21 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
         var hasKeyboardFeatures = _client.IsFeatureAvailable("backlight_timeout") ||
                                   _client.IsFeatureAvailable("per_zone_mode") ||
-                                  _client.IsFeatureAvailable("four_zone_mode");
+                                  _client.IsFeatureAvailable("four_zone_mode") ||
+                                  _client.IsFeatureAvailable("enek5130_hid_rgb");
 
         if (keyboardLightingTab != null)
             keyboardLightingTab.IsVisible = hasKeyboardFeatures;
 
         if (zoneColorControlPanel != null)
-            zoneColorControlPanel.IsVisible = _client.IsFeatureAvailable("per_zone_mode") || AppState.DevMode;
+            zoneColorControlPanel.IsVisible = _client.IsFeatureAvailable("per_zone_mode") ||
+                                              _client.IsFeatureAvailable("enek5130_hid_rgb") ||
+                                              AppState.DevMode;
 
         if (keyboardEffectsPanel != null)
-            keyboardEffectsPanel.IsVisible = _client.IsFeatureAvailable("four_zone_mode") || AppState.DevMode;
+            keyboardEffectsPanel.IsVisible = _client.IsFeatureAvailable("four_zone_mode") ||
+                                             _client.IsFeatureAvailable("enek5130_hid_rgb") ||
+                                             AppState.DevMode;
 
         if (usbChargingPanel != null)
             usbChargingPanel.IsVisible = _client.IsFeatureAvailable("usb_charging") || AppState.DevMode;
