@@ -585,7 +585,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private void ApplyKeyboardSettings()
     {
-        if (!_settings.HasFourZoneKb)
+        if (!HasKeyboardRgbControl())
             return;
 
         ApplySavedZonePresetToUI();
@@ -595,6 +595,11 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
         ApplyFourZoneSettingsToUI();
         ApplySavedLightingEffectPresetToUI();
+    }
+
+    private bool HasKeyboardRgbControl()
+    {
+        return _settings.HasFourZoneKb || _client.IsFeatureAvailable("enek5130_hid_rgb");
     }
 
     private void ApplyPerZoneSettingsToUI()
@@ -869,7 +874,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private async void ApplyKeyboardColorsButton_Click(object sender, RoutedEventArgs e)
     {
-        if (_isConnected && _settings.HasFourZoneKb)
+        if (_isConnected && HasKeyboardRgbControl())
         {
             await _client.SetPerZoneModeAsync(
                 ToRgbHex(_zone1ColorPicker?.Color ?? Color.Parse(DefaultZone1Color)),
@@ -891,7 +896,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private async void LightingEffectsApplyButton_Click(object sender, RoutedEventArgs e)
     {
-        if ((_isConnected && _settings.HasFourZoneKb) || AppState.DevMode)
+        if ((_isConnected && HasKeyboardRgbControl()) || AppState.DevMode)
         {
             var mode = _lightingModeComboBox?.SelectedIndex ?? 0;
 
