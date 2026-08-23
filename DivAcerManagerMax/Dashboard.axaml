@@ -166,6 +166,21 @@
                                                HorizontalAlignment="Right" />
                     </Grid>
 
+                    <StackPanel Orientation="Horizontal" Spacing="25" HorizontalAlignment="Center" Margin="0,0,0,5">
+                        <StackPanel Orientation="Horizontal" Spacing="5">
+                            <TextBlock Text="CPU:" Opacity="0.7" />
+                            <TextBlock Text="{Binding CpuTemp, StringFormat='{}{0}°C'}" FontWeight="SemiBold" />
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" Spacing="5">
+                            <TextBlock Text="GPU:" Opacity="0.7" />
+                            <TextBlock Text="{Binding GpuTemp, StringFormat='{}{0}°C'}" FontWeight="SemiBold" />
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" Spacing="5">
+                            <TextBlock Text="System:" Opacity="0.7" />
+                            <TextBlock Text="{Binding SystemTemp, StringFormat='{}{0}°C'}" FontWeight="SemiBold" />
+                        </StackPanel>
+                    </StackPanel>
+
                     <avalonia:CartesianChart x:Name="TemperatureChart" VerticalAlignment="Stretch" MinHeight="250" />
 
                 </StackPanel>
