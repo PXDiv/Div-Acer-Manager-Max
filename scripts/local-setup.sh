@@ -5,13 +5,17 @@
 # Components: Linuwu-Sense (drivers), DAMX-Daemon, and DAMX-GUI
 
 # Constants
-SCRIPT_VERSION="0.8.8"
+SCRIPT_VERSION="0.9.0"
 INSTALL_DIR="/opt/damx"
 BIN_DIR="/usr/local/bin"
 SYSTEMD_DIR="/etc/systemd/system"
 DAEMON_SERVICE_NAME="damx-daemon.service"
 DESKTOP_FILE_DIR="/usr/share/applications"
 ICON_DIR="/usr/share/icons/hicolor/256x256/apps"
+MODULE_SIGNING_DIR="/var/lib/damx/secureboot"
+MODULE_SIGNING_KEY="${MODULE_SIGNING_DIR}/DAMX-MOK.priv"
+MODULE_SIGNING_CERT="${MODULE_SIGNING_DIR}/DAMX-MOK.der"
+MODULE_SIGNING_REQUIRED=false
 
 # Legacy paths for cleanup (uppercase naming convention)
 LEGACY_INSTALL_DIR="/opt/DAMX"
@@ -140,6 +144,9 @@ comprehensive_cleanup() {
     rm -f "${SYSTEMD_DIR}/${DAEMON_SERVICE_NAME}"
   fi
 
+  # Clean up nitro key detection service
+  cleanup_nitro_service
+
   # Clean up legacy installations
   cleanup_legacy_installation
 
@@ -160,6 +167,9 @@ comprehensive_cleanup() {
     cd ..
   fi
 
+  # Remove nitro key configuration
+  rm -rf /etc/damx
+
   # Final systemd daemon reload
   systemctl daemon-reload
 
@@ -167,20 +177,241 @@ comprehensive_cleanup() {
   return 0
 }
 
-# Detect if kernel was compiled with LLVM/Clang (e.g., CachyOS, some Arch variants)
-# Returns 0 (true) if LLVM kernel detected, 1 (false) otherwise
-is_llvm_kernel() {
-  # Check kernel build info
-  if grep -qi "clang\|llvm" /proc/version 2>/dev/null; then
-    return 0
+# Function to clean up nitro key detection service
+cleanup_nitro_service() {
+  echo -e "${YELLOW}Cleaning up Nitro Key Detection Service...${NC}"
+  
+  NITRO_SERVICE_NAME="nitro-key-detection.service"
+  
+  # Stop the service if it's running
+  if systemctl is-active --quiet ${NITRO_SERVICE_NAME} 2>/dev/null; then
+    echo "Stopping ${NITRO_SERVICE_NAME}..."
+    systemctl stop ${NITRO_SERVICE_NAME}
   fi
-  # Check for known LLVM-based distros
-  if [ -f /etc/os-release ]; then
-    if grep -qi "cachyos" /etc/os-release; then
+  
+  # Disable the service if it's enabled
+  if systemctl is-enabled --quiet ${NITRO_SERVICE_NAME} 2>/dev/null; then
+    echo "Disabling ${NITRO_SERVICE_NAME}..."
+    systemctl disable ${NITRO_SERVICE_NAME}
+  fi
+  
+  # Remove the service file
+  if [ -f "${SYSTEMD_DIR}/${NITRO_SERVICE_NAME}" ]; then
+    echo "Removing ${NITRO_SERVICE_NAME} file..."
+    rm -f "${SYSTEMD_DIR}/${NITRO_SERVICE_NAME}"
+  fi
+  
+  # Remove the nitro key detection script
+  if [ -f "/usr/local/bin/nitro-key-detection.sh" ]; then
+    echo "Removing nitro-key-detection.sh script..."
+    rm -f "/usr/local/bin/nitro-key-detection.sh"
+  fi
+  
+  # Remove nitro key configuration
+  if [ -f "/etc/damx/nitro_key.conf" ]; then
+    echo "Removing nitro_key.conf configuration..."
+    rm -f "/etc/damx/nitro_key.conf"
+  fi
+  
+  echo -e "${GREEN}Nitro Key Detection Service cleanup completed.${NC}"
+}
+
+# Detect the compiler used to build the running kernel.
+is_llvm_kernel() {
+  local kernel_release
+  local kernel_build
+  local config_file
+
+  kernel_release=$(uname -r)
+  kernel_build="/lib/modules/${kernel_release}/build"
+
+  for config_file in "/boot/config-${kernel_release}" "${kernel_build}/.config"; do
+    if [ -r "$config_file" ] && grep -q '^CONFIG_CC_IS_CLANG=y' "$config_file"; then
       return 0
     fi
+  done
+
+  if command -v zgrep &> /dev/null &&
+     [ -r /proc/config.gz ] &&
+     zgrep -q '^CONFIG_CC_IS_CLANG=y' /proc/config.gz; then
+    return 0
   fi
+
+  if grep -qsiE 'clang|llvm' /proc/version 2>/dev/null; then
+    return 0
+  fi
+
+  if [ -r "${kernel_build}/include/generated/compile.h" ] &&
+     grep -qsiE 'clang|llvm' "${kernel_build}/include/generated/compile.h"; then
+    return 0
+  fi
+
+  # CachyOS kernels are LLVM-built by default. Keep this fallback for
+  # installations where the running kernel does not expose its build config.
+  if [ -r /etc/os-release ] && grep -qi 'cachyos' /etc/os-release; then
+    return 0
+  fi
+
   return 1
+}
+
+secure_boot_enabled() {
+  local secure_boot_state
+  local secure_boot_value
+  local secure_boot_var
+
+  if [ -r /sys/module/module/parameters/sig_enforce ] &&
+     grep -qiE '^(1|y|yes)$' /sys/module/module/parameters/sig_enforce; then
+    return 0
+  fi
+
+  if command -v mokutil &> /dev/null; then
+    secure_boot_state=$(mokutil --sb-state 2>/dev/null || true)
+    if echo "$secure_boot_state" | grep -qi 'SecureBoot enabled'; then
+      return 0
+    fi
+    if echo "$secure_boot_state" | grep -qi 'SecureBoot disabled'; then
+      return 1
+    fi
+  fi
+
+  for secure_boot_var in /sys/firmware/efi/efivars/SecureBoot-*; do
+    [ -r "$secure_boot_var" ] || continue
+    secure_boot_value=$(od -An -j4 -N1 -t u1 "$secure_boot_var" 2>/dev/null | tr -d ' ')
+    if [ "$secure_boot_value" = "1" ]; then
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+install_secure_boot_deps() {
+  if command -v pacman &> /dev/null; then
+    pacman -S --needed --noconfirm mokutil openssl
+  elif command -v apt-get &> /dev/null; then
+    apt-get update && apt-get install -y mokutil openssl
+  elif command -v dnf &> /dev/null; then
+    dnf install -y mokutil openssl
+  elif command -v yum &> /dev/null; then
+    yum install -y mokutil openssl
+  elif command -v zypper &> /dev/null; then
+    zypper install -y mokutil openssl
+  else
+    echo -e "${RED}Error: Install mokutil and openssl before continuing.${NC}"
+    return 1
+  fi
+}
+
+prepare_secure_boot_signing() {
+  local key_check_output
+
+  MODULE_SIGNING_REQUIRED=false
+  if ! secure_boot_enabled; then
+    return 0
+  fi
+
+  MODULE_SIGNING_REQUIRED=true
+  echo -e "${YELLOW}Secure Boot is enabled; the Linuwu-Sense module must be signed.${NC}"
+
+  if ! command -v mokutil &> /dev/null || ! command -v openssl &> /dev/null; then
+    echo -e "${YELLOW}Installing Secure Boot signing tools...${NC}"
+    install_secure_boot_deps || return 1
+  fi
+
+  install -d -m 700 "$MODULE_SIGNING_DIR" || return 1
+
+  if [ ! -s "$MODULE_SIGNING_KEY" ] || [ ! -s "$MODULE_SIGNING_CERT" ]; then
+    echo -e "${YELLOW}Generating a DAMX Machine Owner Key...${NC}"
+    (
+      umask 077
+      openssl req -new -x509 -newkey rsa:4096 \
+        -keyout "${MODULE_SIGNING_KEY}.new" \
+        -addext "extendedKeyUsage=codeSigning" \
+        -outform DER \
+        -out "${MODULE_SIGNING_CERT}.new" \
+        -nodes \
+        -days 36500 \
+        -subj "/CN=DAMX Linuwu-Sense Module Signing/"
+    ) || return 1
+    mv -f "${MODULE_SIGNING_KEY}.new" "$MODULE_SIGNING_KEY"
+    mv -f "${MODULE_SIGNING_CERT}.new" "$MODULE_SIGNING_CERT"
+    chmod 600 "$MODULE_SIGNING_KEY"
+    chmod 644 "$MODULE_SIGNING_CERT"
+  fi
+
+  key_check_output=$(LC_ALL=C mokutil --test-key "$MODULE_SIGNING_CERT" 2>&1 || true)
+  case "$key_check_output" in
+    *"is already enrolled"*|*"is already in db"*|*"built-in trusted keyring"*)
+      echo -e "${GREEN}DAMX module-signing key is enrolled.${NC}"
+      return 0
+      ;;
+    *"already in the enrollment request"*)
+      echo -e "${YELLOW}DAMX MOK enrollment is already pending.${NC}"
+      echo -e "${YELLOW}Reboot, complete enrollment in MOK Manager, then run this installer again.${NC}"
+      return 2
+      ;;
+    *"blocked"*)
+      echo -e "${RED}Error: The DAMX module-signing key is blocked by Secure Boot policy.${NC}"
+      return 1
+      ;;
+    *"is not enrolled"*)
+      ;;
+    *)
+      echo -e "${RED}Error: Could not determine whether the DAMX signing key is enrolled.${NC}"
+      echo "$key_check_output"
+      return 1
+      ;;
+  esac
+
+  if [ ! -t 0 ]; then
+    echo -e "${RED}Error: MOK enrollment requires an interactive terminal.${NC}"
+    echo "Run setup.sh directly from a terminal, then reboot and enroll the DAMX key."
+    return 1
+  fi
+
+  echo -e "${YELLOW}The DAMX signing key must be enrolled before the driver can load.${NC}"
+  echo "You will be asked for a one-time password. After rebooting, choose:"
+  echo "  Enroll MOK -> Continue -> Yes"
+  echo "Then enter the same password and reboot once more."
+  if ! mokutil --import "$MODULE_SIGNING_CERT"; then
+    echo -e "${RED}Error: Failed to schedule DAMX MOK enrollment.${NC}"
+    return 1
+  fi
+
+  echo -e "${YELLOW}MOK enrollment has been scheduled.${NC}"
+  echo -e "${YELLOW}Reboot, complete enrollment, then run this installer again.${NC}"
+  return 2
+}
+
+sign_driver_module() {
+  local module_path=$1
+  local sign_file
+  local signer
+
+  sign_file="/lib/modules/$(uname -r)/build/scripts/sign-file"
+
+  if [ ! -x "$sign_file" ]; then
+    echo -e "${RED}Error: Kernel signing tool not found at ${sign_file}.${NC}"
+    return 1
+  fi
+  if [ ! -f "$module_path" ]; then
+    echo -e "${RED}Error: Built module not found at ${module_path}.${NC}"
+    return 1
+  fi
+
+  echo -e "${YELLOW}Signing Linuwu-Sense for Secure Boot...${NC}"
+  "$sign_file" sha256 "$MODULE_SIGNING_KEY" "$MODULE_SIGNING_CERT" "$module_path" ||
+    return 1
+
+  if command -v modinfo &> /dev/null; then
+    signer=$(modinfo -F signer "$module_path" 2>/dev/null || true)
+    if [ -z "$signer" ]; then
+      echo -e "${RED}Error: The built module does not contain a verifiable signature.${NC}"
+      return 1
+    fi
+    echo -e "${GREEN}Module signed by: ${signer}${NC}"
+  fi
 }
 
 # Install build dependencies based on distribution
@@ -197,10 +428,16 @@ install_build_deps() {
     dnf install -y gcc make kernel-devel
   elif command -v zypper &> /dev/null; then
     zypper install -y gcc make kernel-devel
+  else
+    echo -e "${RED}Error: Could not detect a supported package manager.${NC}"
+    return 1
   fi
 }
 
 install_drivers() {
+  local build_args=()
+  local signing_status
+
   echo -e "${YELLOW}Installing Linuwu-Sense drivers...${NC}"
 
   if [ ! -d "Linuwu-Sense" ]; then
@@ -210,38 +447,63 @@ install_drivers() {
     return 1
   fi
 
-  cd Linuwu-Sense
+  cd Linuwu-Sense || return 1
 
   # Install required build dependencies
   if ! command -v make &> /dev/null; then
     echo -e "${YELLOW}Installing build tools...${NC}"
-    install_build_deps
+    install_build_deps || {
+      cd .. || return 1
+      return 1
+    }
+  fi
+
+  if [ "$MODULE_SIGNING_REQUIRED" != true ]; then
+    prepare_secure_boot_signing
+    signing_status=$?
+    if [ $signing_status -ne 0 ]; then
+      cd .. || return 1
+      return $signing_status
+    fi
   fi
 
   # Build driver with appropriate compiler flags
-  # LLVM-compiled kernels (CachyOS, etc.) require matching compiler
   if is_llvm_kernel; then
     echo -e "${YELLOW}Detected LLVM-compiled kernel, using Clang...${NC}"
-    install_build_deps  # Ensure clang is installed
-    make clean LLVM=1 CC=clang
-    make LLVM=1 CC=clang
-    make install LLVM=1 CC=clang
-  else
-    make clean
-    make
-    make install
+    if ! command -v clang &> /dev/null; then
+      install_build_deps || {
+        cd .. || return 1
+        return 1
+      }
+    fi
+    build_args=(LLVM=1 CC=clang)
   fi
 
-  if [ $? -eq 0 ]; then
-    echo -e "${GREEN}Linuwu-Sense drivers installed successfully!${NC}"
-    cd ..
-    return 0
-  else
-    echo -e "${RED}Error: Failed to install Linuwu-Sense drivers${NC}"
-    cd ..
+  if ! make clean "${build_args[@]}" || ! make "${build_args[@]}"; then
+    echo -e "${RED}Error: Failed to build Linuwu-Sense drivers${NC}"
+    cd .. || return 1
     pause
     return 1
   fi
+
+  if [ "$MODULE_SIGNING_REQUIRED" = true ] &&
+     ! sign_driver_module "src/linuwu_sense.ko"; then
+    echo -e "${RED}Error: Failed to sign Linuwu-Sense for Secure Boot${NC}"
+    cd .. || return 1
+    pause
+    return 1
+  fi
+
+  if ! make install "${build_args[@]}"; then
+    echo -e "${RED}Error: Failed to install Linuwu-Sense drivers${NC}"
+    cd .. || return 1
+    pause
+    return 1
+  fi
+
+  echo -e "${GREEN}Linuwu-Sense drivers installed successfully!${NC}"
+  cd .. || return 1
+  return 0
 }
 
 install_daemon() {
@@ -342,9 +604,188 @@ EOL
   return 0
 }
 
+configure_nitro_button() {
+  echo -e "${YELLOW}Configuring Nitro/PredatorSense Button Hardware Code...${NC}"
+
+  # Ask user if they want to setup the key with 10 second timeout.
+  # Default to No so installs/updates do not silently add a keyboard hook service.
+  # Predator machines have the same dedicated button (the PredatorSense key) —
+  # it even sends the same code as the Nitro key on the models tested so far.
+  echo -e "${YELLOW}Do you want to setup your Nitro/PredatorSense Key? (y/N) - Waiting 10 seconds...${NC}"
+  read -t 10 -n 1 -r response
+  
+  # Default to No if timeout or empty response
+  if [[ $? -ne 0 ]] || [[ -z "$response" ]]; then
+    echo -e "\n${BLUE}No response detected. Skipping Nitro button setup.${NC}"
+    response="N"
+  fi
+
+  # Check if user wants to skip
+  if [[ ! "$response" =~ ^[Yy]$ ]]; then
+    echo -e "${BLUE}Skipping button configuration. You can run setup again later to enable it.${NC}"
+    return 0
+  fi
+
+  if ! command -v evtest &> /dev/null; then
+    echo -e "${BLUE}Installing evtest for hardware detection...${NC}"
+    if command -v apt-get &> /dev/null; then
+      apt-get update && apt-get install -y evtest
+    elif command -v dnf &> /dev/null; then
+      dnf install -y evtest
+    elif command -v pacman &> /dev/null; then
+      pacman -S --noconfirm --needed evtest
+    else
+      echo -e "${RED}Could not install evtest automatically. Install it with your package manager and re-run setup.${NC}"
+      return 1
+    fi
+  fi
+
+  DEVICE=$(grep -A 5 -B 5 "AT Translated Set 2 keyboard" /proc/bus/input/devices | grep -m 1 "event" | sed 's/.*event\([0-9]\+\).*/\/dev\/input\/event\1/')
+  
+  mkdir -p /etc/damx
+
+  if [ -z "$DEVICE" ]; then
+    echo -e "${RED}Error: Keyboard hardware not found! Using default Nitro code (425).${NC}"
+    echo "NITRO_KEY=425" > /etc/damx/nitro_key.conf
+    return 1
+  fi
+
+  echo -e "${GREEN}Keyboard detected at: $DEVICE${NC}"
+  echo -e "${YELLOW}>>> PLEASE PRESS YOUR NITRO / PREDATORSENSE BUTTON NOW (Waiting 30 seconds)... <<<${NC}"
+
+  # On both Nitro and Predator EC keyboards the button arrives as scancode
+  # 0xf5, which the kernel maps to keycode 425 unless an hwdb quirk remaps
+  # it (some models get prog1/148). Capturing beats hardcoding either one.
+  CAPTURED_CODE=$(timeout 30 evtest "$DEVICE" | grep -m 1 "type 1 (EV_KEY).*value 1" | sed -n 's/.*code \([0-9]*\).*/\1/p')
+
+  if [ -n "$CAPTURED_CODE" ]; then
+    echo -e "${GREEN}Success! Button code captured: ${CAPTURED_CODE}${NC}"
+    echo "NITRO_KEY=$CAPTURED_CODE" > /etc/damx/nitro_key.conf
+  else
+    echo -e "${RED}Timeout or no key detected. Falling back to default code (425).${NC}"
+    echo -e "${YELLOW}If you DID press the button: key remappers like keyd or kmonad grab the${NC}"
+    echo -e "${YELLOW}keyboard exclusively, so this capture (and the detection service) never${NC}"
+    echo -e "${YELLOW}sees the key. Stop the remapper and re-run setup, or bind the key in the${NC}"
+    echo -e "${YELLOW}remapper's own config instead.${NC}"
+    echo "NITRO_KEY=425" > /etc/damx/nitro_key.conf
+  fi
+  
+  # Install NitroKeyDetection.sh as a service
+  install_nitro_service
+}
+
+detect_desktop_user() {
+  if [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != "root" ] && id -u "$SUDO_USER" >/dev/null 2>&1; then
+    echo "$SUDO_USER"
+    return 0
+  fi
+
+  if command -v loginctl >/dev/null 2>&1; then
+    local session_user
+    session_user=$(loginctl list-sessions --no-legend 2>/dev/null | awk '$3 != "root" && $3 != "gdm" { print $3; exit }')
+    if [ -n "$session_user" ] && id -u "$session_user" >/dev/null 2>&1; then
+      echo "$session_user"
+      return 0
+    fi
+  fi
+
+  awk -F: '$3 >= 1000 && $3 < 60000 && $1 != "nobody" { print $1; exit }' /etc/passwd
+}
+
+install_nitro_service() {
+  echo -e "${YELLOW}Installing Nitro Key Detection Service...${NC}"
+  
+    # First, remove any existing installation
+  # cleanup_nitro_service
+  
+  # Get the directory where the main script is located
+  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  NITRO_SCRIPT="$SCRIPT_DIR/nitro-key-detection.sh"
+  TARGET_USER=$(detect_desktop_user)
+
+  if [ -z "$TARGET_USER" ] || ! id -u "$TARGET_USER" >/dev/null 2>&1; then
+    echo -e "${RED}Error: Could not determine desktop user for Nitro key launcher.${NC}"
+    return 1
+  fi
+
+  echo -e "${BLUE}The button will launch DAMX for user: ${TARGET_USER}${NC}"
+  
+  # Check if NitroKeyDetection.sh exists
+  if [ ! -f "$NITRO_SCRIPT" ]; then
+    echo -e "${RED}Error: NitroKeyDetection.sh not found in $SCRIPT_DIR${NC}"
+    return 1
+  fi
+  
+  # Make the script executable
+  chmod +x "$NITRO_SCRIPT"
+  
+  # Copy script to /usr/local/bin
+  cp "$NITRO_SCRIPT" /usr/local/bin/
+  chmod +x "/usr/local/bin/nitro-key-detection.sh"
+  
+  # Create systemd service file
+  cat > /etc/systemd/system/nitro-key-detection.service << EOF
+[Unit]
+Description=Nitro/PredatorSense Key Detection Service
+After=multi-user.target
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/nitro-key-detection.sh
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+User=root
+Environment=DAMX_TARGET_USER=${TARGET_USER}
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+  # Reload systemd, enable and start the service
+  systemctl daemon-reload
+  systemctl enable nitro-key-detection.service
+  systemctl start nitro-key-detection.service
+  
+  # Check if service is running
+  if systemctl is-active --quiet nitro-key-detection.service; then
+    echo -e "${GREEN}✓ Nitro Key Detection Service installed and running successfully!${NC}"
+    echo -e "${GREEN}Service status: $(systemctl status nitro-key-detection.service --no-pager | grep Active)${NC}"
+  else
+    echo -e "${RED}✗ Service installation failed. Checking logs...${NC}"
+    journalctl -u nitro-key-detection.service -n 10 --no-pager
+    return 1
+  fi
+  
+  echo -e "${BLUE}Service commands:${NC}"
+  echo -e "  Start: systemctl start nitro-key-detection.service"
+  echo -e "  Stop:  systemctl stop nitro-key-detection.service"
+  echo -e "  Status: systemctl status nitro-key-detection.service"
+  echo -e "  Logs:  journalctl -u nitro-key-detection.service -f"
+}
+
+# Example of how to call it from your main script
+# configure_nitro_button
+
 perform_install() {
   local skip_drivers=$1
   local is_update=$2
+  local signing_status
+
+  # Do this before cleanup so a pending MOK enrollment never removes an
+  # otherwise working installation.
+  if [ "$skip_drivers" = false ]; then
+    prepare_secure_boot_signing
+    signing_status=$?
+    if [ $signing_status -ne 0 ]; then
+      if [ $signing_status -eq 2 ]; then
+        pause
+      fi
+      return $signing_status
+    fi
+  fi
 
   # If this is an update/reinstall, perform cleanup first
   if [ "$is_update" = true ]; then
@@ -364,6 +805,10 @@ perform_install() {
   if [ "$skip_drivers" = false ]; then
     install_drivers
     DRIVER_RESULT=$?
+    if [ $DRIVER_RESULT -ne 0 ]; then
+      echo -e "${RED}Driver installation failed; daemon and GUI installation were not attempted.${NC}"
+      return $DRIVER_RESULT
+    fi
   else
     echo -e "${YELLOW}Skipping driver installation as requested.${NC}"
     DRIVER_RESULT=0
@@ -374,6 +819,9 @@ perform_install() {
 
   install_gui
   GUI_RESULT=$?
+
+  #Setup NitroButton shortcut
+  configure_nitro_button
 
   # Check if all installations were successful
   if [ $DRIVER_RESULT -eq 0 ] && [ $DAEMON_RESULT -eq 0 ] && [ $GUI_RESULT -eq 0 ]; then
@@ -448,6 +896,9 @@ main_menu() {
         print_banner
         echo -e "${BLUE}Starting complete installation...${NC}"
         perform_install false false
+        if [ $? -eq 2 ]; then
+          exit 2
+        fi
         ;;
       2)
         print_banner
@@ -464,6 +915,9 @@ main_menu() {
         echo -e "${BLUE}Starting reinstallation/update...${NC}"
         echo -e "${YELLOW}This will completely remove the existing installation before installing the new version.${NC}"
         perform_install false true
+        if [ $? -eq 2 ]; then
+          exit 2
+        fi
         ;;
       5)
         print_banner

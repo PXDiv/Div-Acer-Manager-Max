@@ -64,27 +64,7 @@ Check your device's compatibility here: [Compatibility List](https://github.com/
 
 ## 🖥️ DAMX Installation Guide
 
-You can install DAMX using either of the following methods:
-
-### 🔗 Remote Installation
-
-1. Open a terminal window.
-
-2. Run the following command:
-
-   ```bash
-   curl -fsSL https://raw.githubusercontent.com/PXDiv/Div-Acer-Manager-Max/refs/heads/main/scripts/remoteSetup.sh -o /tmp/setup.sh && sudo bash /tmp/setup.sh
-   ```
-
-3. Follow the on-screen prompts.
-
-4. Done!
-
-### 📦 Local Installation (Alternative Method)
-
-If the remote installation fails for some reason or you've gone offline, follow these steps:
-
-1. Download the latest release from the **Releases** section.
+1. Download the latest release from the **[Releases](https://github.com/PXDiv/Div-Acer-Manager-Max/releases)** section.
 
 2. Extract the downloaded package.
 
@@ -113,6 +93,22 @@ If the remote installation fails for some reason or you've gone offline, follow 
 6. Reboot your system after the installation completes.
 
 ✅ That’s it—you’re all set!
+
+## 🔘 Nitro / PredatorSense Button
+
+During setup you can bind your laptop's dedicated button (the **N** key on
+Nitros, the **PredatorSense** key on Predators) to open DAMX. Both are the
+same button as far as the EC is concerned — it sends scancode `0xf5`, which
+the kernel maps to keycode `425` on most models. Some models carry a udev
+hwdb quirk that remaps it to `prog1` (`148`) instead, which is why setup
+captures the code from an actual press rather than assuming one.
+
+Confirmed so far: Nitro ANV16S-41, Predator PHN16S-71 (both `425`).
+
+**Note for keyd/kmonad users:** key remappers grab the keyboard exclusively,
+so the detection service never sees the button. Bind the key in the
+remapper's config instead (after keyd it typically surfaces as `f16` /
+`XF86Launch7`).
 
 ## 🖥️ Troubleshooting
 

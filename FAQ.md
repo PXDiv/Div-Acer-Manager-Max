@@ -8,14 +8,28 @@ There are several common reasons for driver installation issues:
    Linuwu Sense drivers require **Linux kernel 6.13 or later**. If you're running an older kernel, the installation will fail. Please update your kernel before proceeding.
 
 2. **Secure Boot is Enabled**
-   Secure Boot prevents unsigned kernel modules from loading. This can cause errors like:
+   Secure Boot prevents unsigned or untrusted kernel modules from loading. This can cause errors like:
 
    ```
    modprobe: ERROR: could not insert 'linuwu_sense': Key was rejected by service
    make: Error 1
    ```
 
-   **Solution**: Disable Secure Boot in your BIOS/UEFI settings and try installing again.
+   **Solution**: The installer now creates a DAMX Machine Owner Key (MOK) and
+   asks you to schedule its enrollment. Set the requested one-time password,
+   reboot, choose **Enroll MOK → Continue → Yes**, enter the same password,
+   and reboot again. Then rerun `setup.sh`; it will sign Linuwu-Sense before
+   installing and loading it.
+
+   The private signing key is stored root-only at
+   `/var/lib/damx/secureboot/DAMX-MOK.priv`. You can confirm enrollment with:
+
+   ```bash
+   sudo mokutil --test-key /var/lib/damx/secureboot/DAMX-MOK.der
+   ```
+
+   Disabling Secure Boot is no longer required on systems that support MOK
+   enrollment through shim.
 
 3. **Installation Path Contains Spaces**
    If the installation directory contains spaces (e.g., `DAMX-0.8.8 (1)/setup.sh`), the install script may fail.
