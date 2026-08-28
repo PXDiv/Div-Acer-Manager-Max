@@ -128,13 +128,10 @@ class KeyboardMonitor:
             pass
 
         cmd = [
-            'sudo', '-u', target_user,
-            'env',
-            f'DISPLAY={env.get("DISPLAY", ":0")}',
-            f'WAYLAND_DISPLAY={env.get("WAYLAND_DISPLAY", "wayland-0")}',
-            f'XDG_RUNTIME_DIR={env.get("XDG_RUNTIME_DIR", "/run/user/1000")}',
-            f'DBUS_SESSION_BUS_ADDRESS={env.get("DBUS_SESSION_BUS_ADDRESS", "unix:path=/run/user/1000/bus")}',
-            'nohup', '/usr/bin/damx'
+            'systemd-run',
+            f'--machine={target_user}@.host',
+            '--user',
+            '/usr/bin/damx'
         ]
 
         try:
@@ -204,14 +201,10 @@ class KeyboardMonitor:
         if not target_user:
             return
 
-        env = self.get_user_session_env(target_user)
         cmd = [
-            'sudo', '-u', target_user,
-            'env',
-            f'DISPLAY={env.get("DISPLAY", ":0")}',
-            f'WAYLAND_DISPLAY={env.get("WAYLAND_DISPLAY", "wayland-0")}',
-            f'XDG_RUNTIME_DIR={env.get("XDG_RUNTIME_DIR", "/run/user/1000")}',
-            f'DBUS_SESSION_BUS_ADDRESS={env.get("DBUS_SESSION_BUS_ADDRESS", "unix:path=/run/user/1000/bus")}',
+            'systemd-run',
+            f'--machine={target_user}@.host',
+            '--user',
             '/usr/local/bin/toggle-touchpad.sh'
         ]
         try:
@@ -225,14 +218,10 @@ class KeyboardMonitor:
         if not target_user:
             return
 
-        env = self.get_user_session_env(target_user)
         cmd = [
-            'sudo', '-u', target_user,
-            'env',
-            f'DISPLAY={env.get("DISPLAY", ":0")}',
-            f'WAYLAND_DISPLAY={env.get("WAYLAND_DISPLAY", "wayland-0")}',
-            f'XDG_RUNTIME_DIR={env.get("XDG_RUNTIME_DIR", "/run/user/1000")}',
-            f'DBUS_SESSION_BUS_ADDRESS={env.get("DBUS_SESSION_BUS_ADDRESS", "unix:path=/run/user/1000/bus")}',
+            'systemd-run',
+            f'--machine={target_user}@.host',
+            '--user',
             'notify-send',
             '-a', 'DivAcerManagerMax',
             '-u', 'normal',
