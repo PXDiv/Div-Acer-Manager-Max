@@ -4,7 +4,6 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.Runtime.CompilerServices;
-using System.Threading;
 using System.Threading.Tasks;
 using Avalonia;
 using Avalonia.Controls;
@@ -29,8 +28,6 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private const string AppDataFolderName = "DivAcerManagerMax";
     private const string KeyboardZonePresetFileName = "keyboard-zone-colors.conf";
     private const string KeyboardLightingEffectPresetFileName = "keyboard-lighting-effect.conf";
-    private const int BackLogoMinEffectDelayMs = 250;
-    private const int BackLogoMaxEffectDelayMs = 1200;
 
     private static readonly string AppDataFolderPath =
         Path.Combine(
@@ -45,25 +42,16 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         Path.Combine(AppDataFolderPath, KeyboardLightingEffectPresetFileName);
 
     // UI Controls (will be bound via NameScope)
-    private Button _applyBackLogoButton;
+    private Button? _applyBackLogoButton;
     private Button _applyKeyboardColorsButton;
     private RadioButton _autoFanSpeedRadioButton;
     private CheckBox _backlightTimeoutCheckBox;
     private int _backLogoBrightness = 100;
-    private Slider _backLogoBrightnessSlider;
-    private TextBlock _backLogoBrightnessText;
-    private ColorPicker _backLogoColorPicker;
-    private ComboBox _backLogoEffectComboBox;
-    private int _backLogoEffectSpeed = 5;
-    private Slider _backLogoEffectSpeedSlider;
-    private TextBlock _backLogoEffectSpeedText;
-    private CheckBox _backLogoEnabledCheckBox;
-    private int _backLogoOpacity = 100;
-    private Slider _backLogoOpacitySlider;
-    private TextBlock _backLogoOpacityText;
-    private TextBlock _backLogoEffectiveText;
-    private Button _stopBackLogoEffectButton;
-    private CancellationTokenSource? _backLogoEffectCts;
+    private Slider? _backLogoBrightnessSlider;
+    private TextBlock? _backLogoBrightnessText;
+    private ColorPicker? _backLogoColorPicker;
+    private CheckBox? _backLogoEnabledCheckBox;
+    private TextBlock? _backLogoEffectiveText;
     private RadioButton _balancedProfileButton;
     private CheckBox _batteryLimitCheckBox;
     private CheckBox _bootAnimAndSoundCheckBox;
@@ -187,15 +175,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         _backLogoColorPicker = nameScope.Find<ColorPicker>("BackLogoColorPicker");
         _backLogoBrightnessSlider = nameScope.Find<Slider>("BackLogoBrightnessSlider");
         _backLogoBrightnessText = nameScope.Find<TextBlock>("BackLogoBrightnessText");
-        _backLogoOpacitySlider = nameScope.Find<Slider>("BackLogoOpacitySlider");
-        _backLogoOpacityText = nameScope.Find<TextBlock>("BackLogoOpacityText");
-        _backLogoEffectComboBox = nameScope.Find<ComboBox>("BackLogoEffectComboBox");
-        _backLogoEffectSpeedSlider = nameScope.Find<Slider>("BackLogoEffectSpeedSlider");
-        _backLogoEffectSpeedText = nameScope.Find<TextBlock>("BackLogoEffectSpeedText");
         _backLogoEnabledCheckBox = nameScope.Find<CheckBox>("BackLogoEnabledCheckBox");
         _backLogoEffectiveText = nameScope.Find<TextBlock>("BackLogoEffectiveText");
         _applyBackLogoButton = nameScope.Find<Button>("ApplyBackLogoButton");
-        _stopBackLogoEffectButton = nameScope.Find<Button>("StopBackLogoEffectButton");
 
         // Lighting effects controls
         _lightingModeComboBox = nameScope.Find<ComboBox>("LightingModeComboBox");
@@ -265,22 +247,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
         // Back logo / lightbar handlers
         if (_backLogoBrightnessSlider != null) _backLogoBrightnessSlider.PropertyChanged += BackLogoBrightnessSlider_ValueChanged;
-        if (_backLogoOpacitySlider != null) _backLogoOpacitySlider.PropertyChanged += BackLogoOpacitySlider_ValueChanged;
-        if (_backLogoEffectSpeedSlider != null) _backLogoEffectSpeedSlider.PropertyChanged += BackLogoEffectSpeedSlider_ValueChanged;
         if (_backLogoEnabledCheckBox != null) _backLogoEnabledCheckBox.Click += BackLogoEnabledCheckBox_Click;
         if (_applyBackLogoButton != null) _applyBackLogoButton.Click += ApplyBackLogoButton_Click;
-        if (_stopBackLogoEffectButton != null) _stopBackLogoEffectButton.Click += StopBackLogoEffectButton_Click;
-
-        AttachBackLogoPresetButton("BackLogoPresetWhite", "FFFFFF");
-        AttachBackLogoPresetButton("BackLogoPresetIce", "DFF8FF");
-        AttachBackLogoPresetButton("BackLogoPresetCyan", "00FFCC");
-        AttachBackLogoPresetButton("BackLogoPresetBlue", "0078FF");
-        AttachBackLogoPresetButton("BackLogoPresetPurple", "8A2BE2");
-        AttachBackLogoPresetButton("BackLogoPresetPink", "FF2DAA");
-        AttachBackLogoPresetButton("BackLogoPresetRed", "FF0000");
-        AttachBackLogoPresetButton("BackLogoPresetOrange", "FF7A00");
-        AttachBackLogoPresetButton("BackLogoPresetYellow", "FFD400");
-        AttachBackLogoPresetButton("BackLogoPresetGreen", "00FF66");
 
         // Lighting effects handlers
         if (_lightingSpeedSlider != null) _lightingSpeedSlider.PropertyChanged += LightingSpeedSlider_ValueChanged;
@@ -710,8 +678,10 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             return;
 
         SetColorPicker(_backLogoColorPicker, color);
-        SetBackLogoBrightness(brightness);
-        SetBackLogoOpacity(100);
+        // The driver normalizes a disabled state to RRGGBB,0,0. Preserve the
+        // useful slider value so enabling the logo does not immediately send 0%.
+        if (enabled || brightness > 0)
+            SetBackLogoBrightness(brightness);
         SetCheckBox(_backLogoEnabledCheckBox, enabled);
         UpdateBackLogoEffectiveText();
     }
@@ -963,182 +933,55 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             SetLightingSpeed(Convert.ToInt32(e.NewValue), false);
     }
 
-    private void BackLogoBrightnessSlider_ValueChanged(object sender, AvaloniaPropertyChangedEventArgs e)
+    private void BackLogoBrightnessSlider_ValueChanged(object? sender, AvaloniaPropertyChangedEventArgs e)
     {
         if (e.Property == Slider.ValueProperty)
             SetBackLogoBrightness(Convert.ToInt32(e.NewValue), false);
     }
 
-    private void BackLogoOpacitySlider_ValueChanged(object sender, AvaloniaPropertyChangedEventArgs e)
-    {
-        if (e.Property == Slider.ValueProperty)
-            SetBackLogoOpacity(Convert.ToInt32(e.NewValue), false);
-    }
-
-    private void BackLogoEffectSpeedSlider_ValueChanged(object sender, AvaloniaPropertyChangedEventArgs e)
-    {
-        if (e.Property == Slider.ValueProperty)
-            SetBackLogoEffectSpeed(Convert.ToInt32(e.NewValue), false);
-    }
-
-    private void AttachBackLogoPresetButton(string buttonName, string rgbHex)
-    {
-        var nameScope = this.FindNameScope();
-        var button = nameScope.Find<Button>(buttonName);
-        if (button != null)
-        {
-            button.Click += (_, _) =>
-            {
-                SetColorPicker(_backLogoColorPicker, rgbHex);
-                UpdateBackLogoEffectiveText();
-            };
-        }
-    }
-
-    private async void ApplyBackLogoButton_Click(object sender, RoutedEventArgs e)
+    private async void ApplyBackLogoButton_Click(object? sender, RoutedEventArgs e)
     {
         if (!_isConnected || (!_client.IsFeatureAvailable("back_logo") && !AppState.DevMode))
             return;
 
-        var effectIndex = _backLogoEffectComboBox?.SelectedIndex ?? 0;
-        if (effectIndex <= 0)
-        {
-            StopBackLogoEffect();
-            await ApplyBackLogoStaticAsync();
-            return;
-        }
-
-        StartBackLogoEffect(effectIndex);
-    }
-
-    private async void StopBackLogoEffectButton_Click(object sender, RoutedEventArgs e)
-    {
-        StopBackLogoEffect();
         await ApplyBackLogoStaticAsync();
     }
 
-    private async void BackLogoEnabledCheckBox_Click(object sender, RoutedEventArgs e)
+    private async void BackLogoEnabledCheckBox_Click(object? sender, RoutedEventArgs e)
     {
         if (!_isConnected || (!_client.IsFeatureAvailable("back_logo") && !AppState.DevMode))
             return;
 
-        if (_backLogoEnabledCheckBox?.IsChecked == false)
-            StopBackLogoEffect();
-
         await ApplyBackLogoStaticAsync();
     }
 
-    private async Task ApplyBackLogoStaticAsync(Color? overrideColor = null, int? overrideBrightness = null, bool? overrideEnabled = null)
+    private async Task ApplyBackLogoStaticAsync()
     {
-        var color = overrideColor ?? _backLogoColorPicker?.Color ?? Color.Parse(DefaultBackLogoColor);
-        var enabled = overrideEnabled ?? (_backLogoEnabledCheckBox?.IsChecked ?? true);
-        var brightness = overrideBrightness ?? GetEffectiveBackLogoBrightness(color);
+        var color = _backLogoColorPicker?.Color ?? Color.Parse(DefaultBackLogoColor);
+        var enabled = _backLogoEnabledCheckBox?.IsChecked ?? true;
+        var brightness = Math.Clamp(_backLogoBrightness, 0, 100);
 
-        await _client.SetBackLogoColorAsync(
+        // Avoid the confusing "enabled but dark" state when the user enables
+        // a logo whose previous disabled readback was normalized to 0%.
+        if (enabled && brightness == 0)
+        {
+            brightness = 100;
+            SetBackLogoBrightness(brightness);
+        }
+
+        var success = await _client.SetBackLogoColorAsync(
             ToRgbHex(color),
             brightness,
             enabled
         );
 
-        UpdateBackLogoEffectiveText(brightness);
-    }
-
-    private void StartBackLogoEffect(int effectIndex)
-    {
-        StopBackLogoEffect();
-
-        if (!_isConnected || (!_client.IsFeatureAvailable("back_logo") && !AppState.DevMode))
+        if (!success)
+        {
+            await ShowMessageBox("Back Logo Error", "Failed to apply the back logo/lightbar setting.");
             return;
-
-        _backLogoEffectCts = new CancellationTokenSource();
-        if (_stopBackLogoEffectButton != null)
-            _stopBackLogoEffectButton.IsEnabled = true;
-
-        _ = RunBackLogoEffectSafeAsync(effectIndex, _backLogoEffectCts.Token);
-    }
-
-    private async Task RunBackLogoEffectSafeAsync(int effectIndex, CancellationToken token)
-    {
-        try
-        {
-            switch (effectIndex)
-            {
-                case 1:
-                    await RunBackLogoRainbowCycleAsync(token);
-                    break;
-                case 2:
-                    await RunBackLogoBreathingAsync(token);
-                    break;
-                default:
-                    await ApplyBackLogoStaticAsync();
-                    break;
-            }
         }
-        catch (TaskCanceledException)
-        {
-            // Expected when the user stops an effect.
-        }
-        catch (Exception ex)
-        {
-            await ShowMessageBox("Back Logo Effect Error", $"Failed to run logo effect: {ex.Message}");
-        }
-    }
 
-    private async Task RunBackLogoRainbowCycleAsync(CancellationToken token)
-    {
-        var colors = new[]
-        {
-            "FF0000", "FF7A00", "FFD400", "00FF66", "00FFCC", "0078FF", "8A2BE2", "FF2DAA"
-        };
-
-        while (!token.IsCancellationRequested)
-        {
-            foreach (var hex in colors)
-            {
-                token.ThrowIfCancellationRequested();
-                var color = Color.Parse($"#{hex}");
-                await _client.SetBackLogoColorAsync(hex, GetEffectiveBackLogoBrightness(color), true);
-                await Task.Delay(GetBackLogoEffectDelayMs(), token);
-            }
-        }
-    }
-
-    private async Task RunBackLogoBreathingAsync(CancellationToken token)
-    {
-        var color = _backLogoColorPicker?.Color ?? Color.Parse(DefaultBackLogoColor);
-        var hex = ToRgbHex(color);
-        var maxBrightness = Math.Max(1, GetEffectiveBackLogoBrightness(color));
-        var delay = Math.Max(80, GetBackLogoEffectDelayMs() / 8);
-
-        while (!token.IsCancellationRequested)
-        {
-            for (var level = 10; level <= 100; level += 10)
-            {
-                token.ThrowIfCancellationRequested();
-                await _client.SetBackLogoColorAsync(hex, Math.Max(1, maxBrightness * level / 100), true);
-                await Task.Delay(delay, token);
-            }
-
-            for (var level = 90; level >= 10; level -= 10)
-            {
-                token.ThrowIfCancellationRequested();
-                await _client.SetBackLogoColorAsync(hex, Math.Max(1, maxBrightness * level / 100), true);
-                await Task.Delay(delay, token);
-            }
-        }
-    }
-
-    private void StopBackLogoEffect()
-    {
-        if (_backLogoEffectCts == null)
-            return;
-
-        _backLogoEffectCts.Cancel();
-        _backLogoEffectCts.Dispose();
-        _backLogoEffectCts = null;
-
-        if (_stopBackLogoEffectButton != null)
-            _stopBackLogoEffectButton.IsEnabled = false;
+        UpdateBackLogoEffectiveText();
     }
 
     private async void LightingEffectsApplyButton_Click(object sender, RoutedEventArgs e)
@@ -1237,62 +1080,22 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private void SetBackLogoBrightness(int brightness, bool updateSlider = true)
     {
-        _backLogoBrightness = brightness;
+        _backLogoBrightness = Math.Clamp(brightness, 0, 100);
 
         if (updateSlider && _backLogoBrightnessSlider != null)
-            _backLogoBrightnessSlider.Value = brightness;
+            _backLogoBrightnessSlider.Value = _backLogoBrightness;
 
-        SetText(_backLogoBrightnessText, $"{brightness}%");
-    }
-
-    private void SetBackLogoOpacity(int opacity, bool updateSlider = true)
-    {
-        _backLogoOpacity = Math.Clamp(opacity, 0, 100);
-
-        if (updateSlider && _backLogoOpacitySlider != null)
-            _backLogoOpacitySlider.Value = _backLogoOpacity;
-
-        SetText(_backLogoOpacityText, $"{_backLogoOpacity}%");
+        SetText(_backLogoBrightnessText, $"{_backLogoBrightness}%");
         UpdateBackLogoEffectiveText();
     }
 
-    private void SetBackLogoEffectSpeed(int speed, bool updateSlider = true)
-    {
-        _backLogoEffectSpeed = Math.Clamp(speed, 1, 10);
-
-        if (updateSlider && _backLogoEffectSpeedSlider != null)
-            _backLogoEffectSpeedSlider.Value = _backLogoEffectSpeed;
-
-        SetText(_backLogoEffectSpeedText, _backLogoEffectSpeed.ToString());
-    }
-
-    private int GetEffectiveBackLogoBrightness(Color color)
-    {
-        var alphaPercent = (int)Math.Round(color.A * 100.0 / 255.0);
-        var effective = _backLogoBrightness * _backLogoOpacity * alphaPercent / 10000;
-        return Math.Clamp(effective, 0, 100);
-    }
-
-    private int GetBackLogoEffectDelayMs()
-    {
-        var normalized = Math.Clamp(_backLogoEffectSpeed, 1, 10);
-        return Math.Clamp(BackLogoMaxEffectDelayMs - normalized * 95, BackLogoMinEffectDelayMs, BackLogoMaxEffectDelayMs);
-    }
-
-    private void UpdateBackLogoEffectiveText(int? effectiveBrightness = null)
+    private void UpdateBackLogoEffectiveText()
     {
         var color = _backLogoColorPicker?.Color ?? Color.Parse(DefaultBackLogoColor);
-        var effective = effectiveBrightness ?? GetEffectiveBackLogoBrightness(color);
         var enabled = _backLogoEnabledCheckBox?.IsChecked ?? true;
-        var effect = _backLogoEffectComboBox?.SelectedIndex switch
-        {
-            1 => "Rainbow Cycle",
-            2 => "Breathing",
-            _ => "Static"
-        };
 
         SetText(_backLogoEffectiveText, enabled
-            ? $"Effective output: {effect}, RGB #{ToRgbHex(color)}, intensity {effective}%"
+            ? $"Effective output: RGB #{ToRgbHex(color)}, brightness {_backLogoBrightness}%"
             : "Effective output: logo/lightbar disabled");
     }
 
@@ -1593,12 +1396,6 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
         if (_rightToLeftRadioButton != null)
             _rightToLeftRadioButton.IsChecked = direction == DirectionRightToLeft;
-    }
-
-    protected override void OnClosed(EventArgs e)
-    {
-        StopBackLogoEffect();
-        base.OnClosed(e);
     }
 
     public static class AppState

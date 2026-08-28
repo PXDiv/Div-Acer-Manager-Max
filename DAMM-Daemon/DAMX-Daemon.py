@@ -3,6 +3,7 @@
 # Compatible with Predator and Nitro laptops
 
 import os
+import re
 import subprocess
 import sys
 import json
@@ -997,19 +998,24 @@ class DAMXManager:
         if "back_logo" not in self.available_features:
             return False
 
-        normalized = str(color).strip().lstrip("#")
-        if len(normalized) != 6:
-            log.error(f"Invalid back logo color length: {color}. Must be RRGGBB.")
+        if not isinstance(color, str):
+            log.error(f"Invalid back logo color type: {type(color).__name__}. Must be a string.")
             return False
 
-        try:
-            int(normalized, 16)
-        except ValueError:
+        normalized = color.strip()
+        if normalized.startswith("#"):
+            normalized = normalized[1:]
+
+        if re.fullmatch(r"[0-9A-Fa-f]{6}", normalized) is None:
             log.error(f"Invalid back logo color: {color}. Must be hexadecimal RRGGBB.")
             return False
 
-        if not (0 <= brightness <= 100):
+        if isinstance(brightness, bool) or not isinstance(brightness, int) or not (0 <= brightness <= 100):
             log.error(f"Invalid back logo brightness. Must be between 0 and 100: {brightness}")
+            return False
+
+        if not isinstance(enabled, bool):
+            log.error(f"Invalid back logo enabled value. Must be a boolean: {enabled}")
             return False
 
         color_path = self._get_back_logo_color_path()

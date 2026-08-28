@@ -4,9 +4,9 @@
 
 DAMX itself is a user-space GUI + daemon. The rear logo cannot be controlled unless the kernel driver exposes a sysfs node for it.
 
-The current DAMX package fetches `PXDiv/Div-Linuwu-Sense` at build/package time. The uploaded DAMX repository does not contain the driver source, so this DAMX patch only adds support for a future driver API.
+The driver dependency is implemented by [PXDiv/Div-Linuwu-Sense#20](https://github.com/PXDiv/Div-Linuwu-Sense/pull/20). That PR was tested on a Predator PHN16-72 / EQE_RTX and exposes the sysfs API consumed here.
 
-## Expected driver API
+## Driver API dependency
 
 Expose this sysfs file from the patched `linuwu_sense` driver:
 
@@ -26,9 +26,11 @@ Example:
 echo 'FFFFFF,100,1' | sudo tee /sys/module/linuwu_sense/drivers/platform:acer-wmi/acer-wmi/back_logo/color
 ```
 
-## Driver-side work required
+When disabled, the driver may normalize the readback to `RRGGBB,0,0`. The GUI therefore retains its last useful brightness value so that enabling the logo does not send an unintended 0% brightness.
 
-Patch `PXDiv/Div-Linuwu-Sense`, not only DAMX:
+## Driver-side implementation
+
+The linked driver PR implements the following pieces:
 
 1. Add a capability flag such as `ACER_CAP_BACK_LOGO`.
 2. Add a `back_logo` quirk field and enable it for `Predator PHN16-72` / `EQE_RTX`.
@@ -54,6 +56,8 @@ This repository patch adds:
 - daemon `get_all_settings` field `back_logo_color`
 - C# client method `SetBackLogoColorAsync`
 - GUI card under Keyboard Lighting: color, brightness, enable, apply
+
+The GUI intentionally performs static writes only. Continuous software animations would repeatedly invoke the firmware WMI setter and are outside this integration's safety scope.
 
 ## Important safety note
 
