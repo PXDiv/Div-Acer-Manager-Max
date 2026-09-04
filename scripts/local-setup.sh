@@ -2,7 +2,7 @@
 
 # DAMX Installer Script
 # This script installs, uninstalls, or updates the DAMX Suite for Acer laptops on Linux
-# Components: Linuwu-Sense (drivers), DAMX-Daemon, and DAMX-GUI
+# Components: Linuwu-Sense (drivers), DAMX-Daemon, DAMX-GUI and DAMX-CLI
 
 # Constants
 SCRIPT_VERSION="0.9.0"
@@ -154,7 +154,9 @@ comprehensive_cleanup() {
   echo "Removing current installation files..."
   rm -rf ${INSTALL_DIR}
   rm -f ${BIN_DIR}/DAMX
+  rm -f ${BIN_DIR}/damx
   rm -f ${DESKTOP_FILE_DIR}/damx.desktop
+  rm -f ${DESKTOP_FILE_DIR}/damx-cli.desktop
   rm -f ${ICON_DIR}/damx.png
 
   # Uninstall drivers if Linuwu-Sense folder exists
@@ -604,6 +606,34 @@ EOL
   return 0
 }
 
+install_cli() {
+  echo -e "${YELLOW}Installing DAMX-CLI...${NC}"
+
+  if [ ! -d "DAMX-CLI" ]; then
+    echo -e "${RED}Error: DAMX-CLI directory not found!${NC}"
+    echo "Please make sure the script is run from the same directory containing DAMX-CLI folder."
+    pause
+    return 1
+  fi
+
+  # Create installation directory
+  mkdir -p ${INSTALL_DIR}/cli
+
+  # Copy CLI files (terminal only: no icon, no launcher entry)
+  cp -rf DAMX-CLI/* ${INSTALL_DIR}/cli/
+  chmod +x ${INSTALL_DIR}/cli/DivAcerManagerMax-CLI
+
+  # Create command shortcut (lowercase `damx`; the GUI keeps `DAMX`)
+  cat > ${BIN_DIR}/damx << EOL
+#!/bin/bash
+${INSTALL_DIR}/cli/DivAcerManagerMax-CLI "\$@"
+EOL
+  chmod +x ${BIN_DIR}/damx
+
+  echo -e "${GREEN}DAMX-CLI installed successfully!${NC}"
+  return 0
+}
+
 configure_nitro_button() {
   echo -e "${YELLOW}Configuring Nitro/PredatorSense Button Hardware Code...${NC}"
 
@@ -772,7 +802,16 @@ EOF
 perform_install() {
   local skip_drivers=$1
   local is_update=$2
+  local components=${3:-both}
   local signing_status
+
+  case "$components" in
+    both|gui|cli) ;;
+    *)
+      echo -e "${RED}Error: unknown component set '$components' (use both, gui or cli).${NC}"
+      return 1
+      ;;
+  esac
 
   # Do this before cleanup so a pending MOK enrollment never removes an
   # otherwise working installation.
@@ -806,7 +845,7 @@ perform_install() {
     install_drivers
     DRIVER_RESULT=$?
     if [ $DRIVER_RESULT -ne 0 ]; then
-      echo -e "${RED}Driver installation failed; daemon and GUI installation were not attempted.${NC}"
+      echo -e "${RED}Driver installation failed; daemon, GUI and CLI installation were not attempted.${NC}"
       return $DRIVER_RESULT
     fi
   else
@@ -817,16 +856,31 @@ perform_install() {
   install_daemon
   DAEMON_RESULT=$?
 
-  install_gui
-  GUI_RESULT=$?
+  GUI_RESULT=0
+  CLI_RESULT=0
+
+  if [ "$components" = "both" ] || [ "$components" = "gui" ]; then
+    install_gui
+    GUI_RESULT=$?
+  fi
+
+  if [ "$components" = "both" ] || [ "$components" = "cli" ]; then
+    install_cli
+    CLI_RESULT=$?
+  fi
 
   #Setup NitroButton shortcut
   configure_nitro_button
 
   # Check if all installations were successful
-  if [ $DRIVER_RESULT -eq 0 ] && [ $DAEMON_RESULT -eq 0 ] && [ $GUI_RESULT -eq 0 ]; then
+  if [ $DRIVER_RESULT -eq 0 ] && [ $DAEMON_RESULT -eq 0 ] && [ $GUI_RESULT -eq 0 ] && [ $CLI_RESULT -eq 0 ]; then
     echo -e "${GREEN}DAMX Suite installation completed successfully!${NC}"
-    echo -e "You can now run the GUI using the ${BLUE}DAMX${NC} command or from your application launcher."
+    if [ "$components" = "both" ] || [ "$components" = "gui" ]; then
+      echo -e "GUI: run ${BLUE}DAMX${NC} or use your application launcher."
+    fi
+    if [ "$components" = "both" ] || [ "$components" = "cli" ]; then
+      echo -e "CLI: run ${BLUE}damx status${NC} (try ${BLUE}damx help${NC} for all commands)."
+    fi
 
     # Show service status
     echo ""
@@ -881,29 +935,31 @@ main_menu() {
     print_banner
 
     echo -e "Please select an option:"
-    echo -e "  ${GREEN}1${NC}) Install DAMX Suite (complete)"
-    echo -e "  ${GREEN}2${NC}) Install DAMX Suite (without drivers)"
+    echo -e "  ${GREEN}1${NC}) Install DAMX Suite complete (GUI + CLI)"
+    echo -e "  ${GREEN}2${NC}) Install DAMX Suite without drivers (GUI + CLI)"
     echo -e "  ${GREEN}3${NC}) Uninstall DAMX Suite"
-    echo -e "  ${GREEN}4${NC}) Reinstall/Update DAMX Suite (recommended for upgrades)"
+    echo -e "  ${GREEN}4${NC}) Reinstall/Update DAMX Suite (GUI + CLI, recommended for upgrades)"
     echo -e "  ${GREEN}5${NC}) Check service status"
+    echo -e "  ${GREEN}6${NC}) Install CLI only (damx command)"
+    echo -e "  ${GREEN}7${NC}) Install GUI only (DAMX command)"
     echo -e "  ${GREEN}q${NC}) Quit"
     echo ""
 
-    read -p "Enter your choice [1-5 or q]: " choice
+    read -p "Enter your choice [1-7 or q]: " choice
 
     case $choice in
       1)
         print_banner
-        echo -e "${BLUE}Starting complete installation...${NC}"
-        perform_install false false
+        echo -e "${BLUE}Starting complete installation (GUI + CLI)...${NC}"
+        perform_install false false both
         if [ $? -eq 2 ]; then
           exit 2
         fi
         ;;
       2)
         print_banner
-        echo -e "${BLUE}Starting installation without drivers...${NC}"
-        perform_install true false
+        echo -e "${BLUE}Starting installation without drivers (GUI + CLI)...${NC}"
+        perform_install true false both
         ;;
       3)
         print_banner
@@ -912,9 +968,9 @@ main_menu() {
         ;;
       4)
         print_banner
-        echo -e "${BLUE}Starting reinstallation/update...${NC}"
+        echo -e "${BLUE}Starting reinstallation/update (GUI + CLI)...${NC}"
         echo -e "${YELLOW}This will completely remove the existing installation before installing the new version.${NC}"
-        perform_install false true
+        perform_install false true both
         if [ $? -eq 2 ]; then
           exit 2
         fi
@@ -930,6 +986,22 @@ main_menu() {
         fi
         echo ""
         pause
+        ;;
+      6)
+        print_banner
+        echo -e "${BLUE}Starting CLI-only installation...${NC}"
+        perform_install false false cli
+        if [ $? -eq 2 ]; then
+          exit 2
+        fi
+        ;;
+      7)
+        print_banner
+        echo -e "${BLUE}Starting GUI-only installation...${NC}"
+        perform_install false false gui
+        if [ $? -eq 2 ]; then
+          exit 2
+        fi
         ;;
       q|Q)
         echo -e "${BLUE}Exiting installer. Goodbye!${NC}"
