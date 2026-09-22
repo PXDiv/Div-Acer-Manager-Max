@@ -111,9 +111,12 @@ class PowerSourceDetector:
             # On battery power - enforce balanced or eco mode
             log.info("Switched to battery power")
 
-            if current_profile not in ["balanced", "quiet", "power-saver"]:
-                # If current profile isn't battery-friendly, switch to balanced
-                if "balanced" in available_profiles:
+            if current_profile not in ["balanced", "quiet", "power-saver", "low-power"]:
+                # If current profile isn't battery-friendly, switch to low-power or balanced
+                if "low-power" in available_profiles:
+                    log.info("Auto-switching to low-power (ECO) mode for battery power")
+                    self.manager.set_thermal_profile("low-power")
+                elif "balanced" in available_profiles:
                     log.info("Auto-switching to balanced mode for battery power")
                     self.manager.set_thermal_profile("balanced")
                 elif "quiet" in available_profiles:
