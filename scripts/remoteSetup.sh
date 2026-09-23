@@ -289,7 +289,9 @@ comprehensive_cleanup() {
   echo "Removing current installation files..."
   rm -rf ${INSTALL_DIR}
   rm -f ${BIN_DIR}/DAMX
+  rm -f ${BIN_DIR}/damx
   rm -f ${DESKTOP_FILE_DIR}/damx.desktop
+  rm -f ${DESKTOP_FILE_DIR}/damx-cli.desktop
   rm -f ${ICON_DIR}/damx.png
 
   # Final systemd daemon reload
@@ -683,8 +685,43 @@ EOL
   return 0
 }
 
+install_cli() {
+  echo -e "${YELLOW}Installing DAMX-CLI...${NC}"
+
+  if [ ! -d "$EXTRACTED_DIR/DAMX-CLI" ]; then
+    echo -e "${RED}Error: DAMX-CLI directory not found in package!${NC}"
+    return 1
+  fi
+
+  # Create installation directory
+  mkdir -p ${INSTALL_DIR}/cli
+
+  # Copy CLI files (terminal only: no icon, no launcher entry)
+  cp -rf "$EXTRACTED_DIR/DAMX-CLI"/* ${INSTALL_DIR}/cli/
+  chmod +x ${INSTALL_DIR}/cli/DivAcerManagerMax-CLI
+
+  # Create command shortcut (lowercase `damx`; the GUI keeps `DAMX`)
+  cat > ${BIN_DIR}/damx << EOL
+#!/bin/bash
+${INSTALL_DIR}/cli/DivAcerManagerMax-CLI "\$@"
+EOL
+  chmod +x ${BIN_DIR}/damx
+
+  echo -e "${GREEN}DAMX-CLI installed successfully!${NC}"
+  return 0
+}
+
 perform_install() {
+  local components=${1:-both}
   local signing_status
+
+  case "$components" in
+    both|gui|cli) ;;
+    *)
+      echo -e "${RED}Error: unknown component set '$components' (use both, gui or cli).${NC}"
+      return 1
+      ;;
+  esac
 
   # Do this before cleanup so a pending MOK enrollment never removes an
   # otherwise working installation.
@@ -708,20 +745,35 @@ perform_install() {
   install_drivers
   DRIVER_RESULT=$?
   if [ $DRIVER_RESULT -ne 0 ]; then
-    echo -e "${RED}Driver installation failed; daemon and GUI installation were not attempted.${NC}"
+    echo -e "${RED}Driver installation failed; daemon, GUI and CLI installation were not attempted.${NC}"
     return $DRIVER_RESULT
   fi
 
   install_daemon
   DAEMON_RESULT=$?
 
-  install_gui
-  GUI_RESULT=$?
+  GUI_RESULT=0
+  CLI_RESULT=0
+
+  if [ "$components" = "both" ] || [ "$components" = "gui" ]; then
+    install_gui
+    GUI_RESULT=$?
+  fi
+
+  if [ "$components" = "both" ] || [ "$components" = "cli" ]; then
+    install_cli
+    CLI_RESULT=$?
+  fi
 
   # Check if all installations were successful
-  if [ $DRIVER_RESULT -eq 0 ] && [ $DAEMON_RESULT -eq 0 ] && [ $GUI_RESULT -eq 0 ]; then
+  if [ $DRIVER_RESULT -eq 0 ] && [ $DAEMON_RESULT -eq 0 ] && [ $GUI_RESULT -eq 0 ] && [ $CLI_RESULT -eq 0 ]; then
     echo -e "${GREEN}DAMX Suite installation completed successfully!${NC}"
-    echo -e "You can now run the GUI using the ${BLUE}DAMX${NC} command or from your application launcher."
+    if [ "$components" = "both" ] || [ "$components" = "gui" ]; then
+      echo -e "GUI: run ${BLUE}DAMX${NC} or use your application launcher."
+    fi
+    if [ "$components" = "both" ] || [ "$components" = "cli" ]; then
+      echo -e "CLI: run ${BLUE}damx status${NC} (try ${BLUE}damx help${NC} for all commands)."
+    fi
 
     # Show service status
     echo ""
@@ -825,10 +877,10 @@ main() {
     exit 1
   fi
 
-  # Perform installation
+  # Perform installation (GUI + CLI by default; override with DAMX_COMPONENTS=gui|cli)
   echo ""
   echo -e "${BLUE}Starting DAMX Suite installation...${NC}"
-  perform_install
+  perform_install "${DAMX_COMPONENTS:-both}"
   install_result=$?
   if [ $install_result -eq 0 ]; then
     echo ""
@@ -836,8 +888,8 @@ main() {
     echo -e "Release: ${RELEASE_NAME}"
     echo ""
     echo -e "${BLUE}Next steps:${NC}"
-    echo -e "• Run ${GREEN}DAMX${NC} from the command line"
-    echo -e "• Or find 'DAMX' in your application launcher"
+    echo -e "• GUI: run ${GREEN}DAMX${NC} from the command line or find 'DAMX' in your application launcher"
+    echo -e "• CLI: run ${GREEN}damx status${NC} from any terminal"
     echo -e "• Check service status: ${GREEN}systemctl status ${DAEMON_SERVICE_NAME}${NC}"
     echo ""
   elif [ $install_result -eq 2 ]; then
@@ -857,15 +909,31 @@ case "${1:-}" in
     uninstall
     exit 0
     ;;
+  --cli-only)
+    check_root "$@"
+    export DAMX_COMPONENTS=cli
+    main
+    exit $?
+    ;;
+  --gui-only)
+    check_root "$@"
+    export DAMX_COMPONENTS=gui
+    main
+    exit $?
+    ;;
   --help|-h)
     echo "DAMX Remote Installer"
     echo ""
     echo "Usage:"
     echo "  curl -sSL https://raw.githubusercontent.com/PXDiv/Div-Acer-Manager-Max/main/remote-setup.sh | bash"
     echo "  curl -sSL https://raw.githubusercontent.com/PXDiv/Div-Acer-Manager-Max/main/remote-setup.sh | bash -s -- --uninstall"
+    echo "  curl -sSL https://raw.githubusercontent.com/PXDiv/Div-Acer-Manager-Max/main/remote-setup.sh | bash -s -- --cli-only"
+    echo "  curl -sSL https://raw.githubusercontent.com/PXDiv/Div-Acer-Manager-Max/main/remote-setup.sh | bash -s -- --gui-only"
     echo ""
     echo "Options:"
     echo "  --uninstall    Uninstall DAMX Suite"
+    echo "  --cli-only     Install the CLI (damx command) only"
+    echo "  --gui-only     Install the GUI (DAMX command) only"
     echo "  --help, -h     Show this help message"
     exit 0
     ;;

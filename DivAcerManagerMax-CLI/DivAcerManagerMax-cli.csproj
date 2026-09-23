@@ -1,0 +1,21 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <OutputType>Exe</OutputType>
+        <TargetFramework>net9.0</TargetFramework>
+        <Nullable>enable</Nullable>
+        <ImplicitUsings>disable</ImplicitUsings>
+        <AssemblyName>DivAcerManagerMax-CLI</AssemblyName>
+        <RootNamespace>DivAcerManagerMax</RootNamespace>
+        <Version>1.0.2</Version>
+        <Description>Div Acer Manager Max - CLI for Acer Nitro/Predator laptops on Linux (fan control, thermal profiles, battery, keyboard RGB via DAMX-Daemon).</Description>
+        <!-- Single-file self-contained publish, see workflows for the full command. -->
+        <PublishSingleFile Condition="'$(Configuration)' == 'Release'">true</PublishSingleFile>
+        <IncludeNativeLibrariesForSelfExtract Condition="'$(Configuration)' == 'Release'">true</IncludeNativeLibrariesForSelfExtract>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="..\DAMXCommon\DAMXCommon.csproj" />
+    </ItemGroup>
+
+</Project>
