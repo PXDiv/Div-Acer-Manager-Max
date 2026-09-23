@@ -22,6 +22,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private const string DefaultZone2Color = "#ff5733";
     private const string DefaultZone3Color = "#33ff57";
     private const string DefaultZone4Color = "#ffff01";
+    private const string DefaultBackLogoColor = "#FFFFFF";
     private const int DirectionLeftToRight = 1;
     private const int DirectionRightToLeft = 2;
     private const string AppDataFolderName = "DivAcerManagerMax";
@@ -41,9 +42,16 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         Path.Combine(AppDataFolderPath, KeyboardLightingEffectPresetFileName);
 
     // UI Controls (will be bound via NameScope)
+    private Button? _applyBackLogoButton;
     private Button _applyKeyboardColorsButton;
     private RadioButton _autoFanSpeedRadioButton;
     private CheckBox _backlightTimeoutCheckBox;
+    private int _backLogoBrightness = 100;
+    private Slider? _backLogoBrightnessSlider;
+    private TextBlock? _backLogoBrightnessText;
+    private ColorPicker? _backLogoColorPicker;
+    private CheckBox? _backLogoEnabledCheckBox;
+    private TextBlock? _backLogoEffectiveText;
     private RadioButton _balancedProfileButton;
     private CheckBox _batteryLimitCheckBox;
     private CheckBox _bootAnimAndSoundCheckBox;
@@ -163,6 +171,14 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         _keyBrightnessText = nameScope.Find<TextBlock>("KeyBrightnessText");
         _applyKeyboardColorsButton = nameScope.Find<Button>("ApplyKeyboardColorsButton");
 
+        // Back logo / lightbar controls
+        _backLogoColorPicker = nameScope.Find<ColorPicker>("BackLogoColorPicker");
+        _backLogoBrightnessSlider = nameScope.Find<Slider>("BackLogoBrightnessSlider");
+        _backLogoBrightnessText = nameScope.Find<TextBlock>("BackLogoBrightnessText");
+        _backLogoEnabledCheckBox = nameScope.Find<CheckBox>("BackLogoEnabledCheckBox");
+        _backLogoEffectiveText = nameScope.Find<TextBlock>("BackLogoEffectiveText");
+        _applyBackLogoButton = nameScope.Find<Button>("ApplyBackLogoButton");
+
         // Lighting effects controls
         _lightingModeComboBox = nameScope.Find<ComboBox>("LightingModeComboBox");
         _lightingSpeedSlider = nameScope.Find<Slider>("LightingSpeedSlider");
@@ -229,6 +245,11 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         if (_keyBrightnessSlider != null) _keyBrightnessSlider.PropertyChanged += KeyboardBrightnessSlider_ValueChanged;
         if (_applyKeyboardColorsButton != null) _applyKeyboardColorsButton.Click += ApplyKeyboardColorsButton_Click;
 
+        // Back logo / lightbar handlers
+        if (_backLogoBrightnessSlider != null) _backLogoBrightnessSlider.PropertyChanged += BackLogoBrightnessSlider_ValueChanged;
+        if (_backLogoEnabledCheckBox != null) _backLogoEnabledCheckBox.Click += BackLogoEnabledCheckBox_Click;
+        if (_applyBackLogoButton != null) _applyBackLogoButton.Click += ApplyBackLogoButton_Click;
+
         // Lighting effects handlers
         if (_lightingSpeedSlider != null) _lightingSpeedSlider.PropertyChanged += LightingSpeedSlider_ValueChanged;
         if (_lightingEffectsApplyButton != null) _lightingEffectsApplyButton.Click += LightingEffectsApplyButton_Click;
@@ -277,7 +298,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
         var hasKeyboardFeatures = _client.IsFeatureAvailable("backlight_timeout") ||
                                   _client.IsFeatureAvailable("per_zone_mode") ||
-                                  _client.IsFeatureAvailable("four_zone_mode");
+                                  _client.IsFeatureAvailable("four_zone_mode") ||
+                                  _client.IsFeatureAvailable("back_logo");
 
         if (keyboardLightingTab != null)
             keyboardLightingTab.IsVisible = hasKeyboardFeatures;
@@ -287,6 +309,10 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
         if (keyboardEffectsPanel != null)
             keyboardEffectsPanel.IsVisible = _client.IsFeatureAvailable("four_zone_mode") || AppState.DevMode;
+
+        var backLogoControls = nameScope.Find<Border>("BackLogoControls");
+        if (backLogoControls != null)
+            backLogoControls.IsVisible = _client.IsFeatureAvailable("back_logo") || AppState.DevMode;
 
         if (usbChargingPanel != null)
             usbChargingPanel.IsVisible = _client.IsFeatureAvailable("usb_charging") || AppState.DevMode;
@@ -475,6 +501,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             _manualFanSpeedRadioButton.IsChecked = isManualMode;
 
         ApplyKeyboardSettings();
+        ApplyBackLogoSettingsToUI();
 
         SetText(_keyBrightnessText, $"{_keyboardBrightness}%");
         SetText(_lightSpeedTextBlock, _lightingSpeed.ToString());
@@ -635,6 +662,28 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         // Mode 2 / Neon often reports 0,0,0. Do not overwrite the color picker with black for that.
         if (mode != 2 || red != 0 || green != 0 || blue != 0)
             SetColorPicker(_lightEffectColorPicker, $"{red:X2}{green:X2}{blue:X2}");
+    }
+
+
+    private void ApplyBackLogoSettingsToUI()
+    {
+        if (string.IsNullOrWhiteSpace(_settings.BackLogoColor))
+            return;
+
+        if (!TryParseBackLogoColor(
+                _settings.BackLogoColor,
+                out var color,
+                out var brightness,
+                out var enabled))
+            return;
+
+        SetColorPicker(_backLogoColorPicker, color);
+        // The driver normalizes a disabled state to RRGGBB,0,0. Preserve the
+        // useful slider value so enabling the logo does not immediately send 0%.
+        if (enabled || brightness > 0)
+            SetBackLogoBrightness(brightness);
+        SetCheckBox(_backLogoEnabledCheckBox, enabled);
+        UpdateBackLogoEffectiveText();
     }
 
     private async Task ShowMessageBox(string title, string message)
@@ -884,6 +933,57 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             SetLightingSpeed(Convert.ToInt32(e.NewValue), false);
     }
 
+    private void BackLogoBrightnessSlider_ValueChanged(object? sender, AvaloniaPropertyChangedEventArgs e)
+    {
+        if (e.Property == Slider.ValueProperty)
+            SetBackLogoBrightness(Convert.ToInt32(e.NewValue), false);
+    }
+
+    private async void ApplyBackLogoButton_Click(object? sender, RoutedEventArgs e)
+    {
+        if (!_isConnected || (!_client.IsFeatureAvailable("back_logo") && !AppState.DevMode))
+            return;
+
+        await ApplyBackLogoStaticAsync();
+    }
+
+    private async void BackLogoEnabledCheckBox_Click(object? sender, RoutedEventArgs e)
+    {
+        if (!_isConnected || (!_client.IsFeatureAvailable("back_logo") && !AppState.DevMode))
+            return;
+
+        await ApplyBackLogoStaticAsync();
+    }
+
+    private async Task ApplyBackLogoStaticAsync()
+    {
+        var color = _backLogoColorPicker?.Color ?? Color.Parse(DefaultBackLogoColor);
+        var enabled = _backLogoEnabledCheckBox?.IsChecked ?? true;
+        var brightness = Math.Clamp(_backLogoBrightness, 0, 100);
+
+        // Avoid the confusing "enabled but dark" state when the user enables
+        // a logo whose previous disabled readback was normalized to 0%.
+        if (enabled && brightness == 0)
+        {
+            brightness = 100;
+            SetBackLogoBrightness(brightness);
+        }
+
+        var success = await _client.SetBackLogoColorAsync(
+            ToRgbHex(color),
+            brightness,
+            enabled
+        );
+
+        if (!success)
+        {
+            await ShowMessageBox("Back Logo Error", "Failed to apply the back logo/lightbar setting.");
+            return;
+        }
+
+        UpdateBackLogoEffectiveText();
+    }
+
     private async void LightingEffectsApplyButton_Click(object sender, RoutedEventArgs e)
     {
         if ((_isConnected && _settings.HasFourZoneKb) || AppState.DevMode)
@@ -978,6 +1078,27 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         SetText(_lightSpeedTextBlock, speed.ToString());
     }
 
+    private void SetBackLogoBrightness(int brightness, bool updateSlider = true)
+    {
+        _backLogoBrightness = Math.Clamp(brightness, 0, 100);
+
+        if (updateSlider && _backLogoBrightnessSlider != null)
+            _backLogoBrightnessSlider.Value = _backLogoBrightness;
+
+        SetText(_backLogoBrightnessText, $"{_backLogoBrightness}%");
+        UpdateBackLogoEffectiveText();
+    }
+
+    private void UpdateBackLogoEffectiveText()
+    {
+        var color = _backLogoColorPicker?.Color ?? Color.Parse(DefaultBackLogoColor);
+        var enabled = _backLogoEnabledCheckBox?.IsChecked ?? true;
+
+        SetText(_backLogoEffectiveText, enabled
+            ? $"Effective output: RGB #{ToRgbHex(color)}, brightness {_backLogoBrightness}%"
+            : "Effective output: logo/lightbar disabled");
+    }
+
     private static string ToRgbHex(Color color)
     {
         return $"{color.R:X2}{color.G:X2}{color.B:X2}";
@@ -1052,6 +1173,47 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             return false;
 
         return brightness is >= 0 and <= 100;
+    }
+
+
+    private static bool TryParseBackLogoColor(
+        string? value,
+        out string color,
+        out int brightness,
+        out bool enabled)
+    {
+        color = "FFFFFF";
+        brightness = 100;
+        enabled = true;
+
+        if (string.IsNullOrWhiteSpace(value))
+            return false;
+
+        var parts = value.Trim().Split(',', StringSplitOptions.TrimEntries);
+
+        if (parts.Length < 2 || parts.Length > 3)
+            return false;
+
+        color = NormalizeRgbHex(parts[0]) ?? "";
+        if (color.Length != 6)
+            return false;
+
+        if (!int.TryParse(parts[1], out brightness) || brightness is < 0 or > 100)
+            return false;
+
+        if (parts.Length == 3)
+        {
+            if (!int.TryParse(parts[2], out var enableValue) || enableValue is < 0 or > 1)
+                return false;
+
+            enabled = enableValue == 1;
+        }
+        else
+        {
+            enabled = brightness > 0;
+        }
+
+        return true;
     }
 
     private static bool TryParseFourZoneMode(
