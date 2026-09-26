@@ -277,16 +277,21 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
         var hasKeyboardFeatures = _client.IsFeatureAvailable("backlight_timeout") ||
                                   _client.IsFeatureAvailable("per_zone_mode") ||
-                                  _client.IsFeatureAvailable("four_zone_mode");
+                                  _client.IsFeatureAvailable("four_zone_mode") ||
+                                  _client.IsFeatureAvailable("enek5130_hid_rgb");
 
         if (keyboardLightingTab != null)
             keyboardLightingTab.IsVisible = hasKeyboardFeatures;
 
         if (zoneColorControlPanel != null)
-            zoneColorControlPanel.IsVisible = _client.IsFeatureAvailable("per_zone_mode") || AppState.DevMode;
+            zoneColorControlPanel.IsVisible = _client.IsFeatureAvailable("per_zone_mode") ||
+                                              _client.IsFeatureAvailable("enek5130_hid_rgb") ||
+                                              AppState.DevMode;
 
         if (keyboardEffectsPanel != null)
-            keyboardEffectsPanel.IsVisible = _client.IsFeatureAvailable("four_zone_mode") || AppState.DevMode;
+            keyboardEffectsPanel.IsVisible = _client.IsFeatureAvailable("four_zone_mode") ||
+                                             _client.IsFeatureAvailable("enek5130_hid_rgb") ||
+                                             AppState.DevMode;
 
         if (usbChargingPanel != null)
             usbChargingPanel.IsVisible = _client.IsFeatureAvailable("usb_charging") || AppState.DevMode;
@@ -580,7 +585,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private void ApplyKeyboardSettings()
     {
-        if (!_settings.HasFourZoneKb)
+        if (!HasKeyboardRgbControl())
             return;
 
         ApplySavedZonePresetToUI();
@@ -590,6 +595,11 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
         ApplyFourZoneSettingsToUI();
         ApplySavedLightingEffectPresetToUI();
+    }
+
+    private bool HasKeyboardRgbControl()
+    {
+        return _settings.HasFourZoneKb || _client.IsFeatureAvailable("enek5130_hid_rgb");
     }
 
     private void ApplyPerZoneSettingsToUI()
@@ -864,7 +874,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private async void ApplyKeyboardColorsButton_Click(object sender, RoutedEventArgs e)
     {
-        if (_isConnected && _settings.HasFourZoneKb)
+        if (_isConnected && HasKeyboardRgbControl())
         {
             await _client.SetPerZoneModeAsync(
                 ToRgbHex(_zone1ColorPicker?.Color ?? Color.Parse(DefaultZone1Color)),
@@ -886,7 +896,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private async void LightingEffectsApplyButton_Click(object sender, RoutedEventArgs e)
     {
-        if ((_isConnected && _settings.HasFourZoneKb) || AppState.DevMode)
+        if ((_isConnected && HasKeyboardRgbControl()) || AppState.DevMode)
         {
             var mode = _lightingModeComboBox?.SelectedIndex ?? 0;
 
