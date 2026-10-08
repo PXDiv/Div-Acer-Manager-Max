@@ -1,0 +1,22 @@
+[Unit]
+Description=Acer Predator/Nitro Fan Curve Daemon
+Documentation=https://github.com/PXDiv/Div-Acer-Manager-Max
+After=damx-daemon.service
+Requires=damx-daemon.service
+ConditionPathExists=/sys/module/linuwu_sense
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /opt/damx/fan-curve-daemon.py
+Restart=on-failure
+RestartSec=5
+Nice=-5
+
+# Security hardening
+ProtectHome=read-only
+ProtectSystem=strict
+ReadWritePaths=/sys/module/linuwu_sense /sys/devices/platform/acer-wmi /var/log /sys/firmware/acpi /sys/class/hwmon
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

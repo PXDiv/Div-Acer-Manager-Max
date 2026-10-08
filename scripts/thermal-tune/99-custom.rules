@@ -1,0 +1,32 @@
+# Custom performance and core-scheduling rules for i7-13700HX Hybrid Architecture
+# Wakes up P-cores for critical low-latency game engines, shifts bloated launchers to E-cores.
+
+# Filesystems (critical for loading times, FUSE is highly CPU-bound)
+{ "name": "ntfs-3g", "type": "LowLatency_RT" }
+{ "name": "mount.ntfs-3g", "type": "LowLatency_RT" }
+{ "name": "mount.ntfs", "type": "LowLatency_RT" }
+
+# Wine / Proton / Game translation layers (must stay on P-cores)
+{ "name": "wineserver", "type": "LowLatency_RT" }
+{ "name": "wine-preloader", "type": "Game" }
+{ "name": "wine64-preloader", "type": "Game" }
+{ "name": "dxvk-submit", "type": "LowLatency_RT" }
+
+# Specific Game Executables (P-Core Priority, Nice -5, Best-Effort I/O)
+{ "name": "CivilizationVI", "type": "Game" }
+{ "name": "CivilizationVI_", "type": "Game" }
+{ "name": "Civ6", "type": "Game" }
+{ "name": "MTGA.exe", "type": "Game" }
+{ "name": "exefile.exe", "type": "Game" }
+{ "name": "StarTrekOnline.exe", "type": "Game" }
+{ "name": "GameClient.exe", "type": "Game" }
+{ "name": "Fallout4.exe", "type": "Game" }
+{ "name": "SkyrimSE.exe", "type": "Game" }
+{ "name": "TESV.exe", "type": "Game" }
+
+# Game Launchers & Bloat (chromium helpers - push to E-cores)
+{ "name": "lutris", "type": "BG_CPUIO" }
+{ "name": "steam", "type": "BG_CPUIO" }
+{ "name": "epicgameslauncher.exe", "type": "BG_CPUIO" }
+{ "name": "origin.exe", "type": "BG_CPUIO" }
+{ "name": "galaxyclient.exe", "type": "BG_CPUIO" }
