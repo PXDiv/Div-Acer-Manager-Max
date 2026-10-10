@@ -632,8 +632,16 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
         SetDirectionRadioButtons(direction);
 
-        // Mode 2 / Neon often reports 0,0,0. Do not overwrite the color picker with black for that.
-        if (mode != 2 || red != 0 || green != 0 || blue != 0)
+        // Static colors live in the zone registers, not the global effect RGB.
+        if (mode == 0)
+        {
+            if (TryParsePerZoneMode(_settings.PerZoneMode,
+                    out var zone1, out var zone2, out var zone3, out var zone4, out _) &&
+                zone1 == zone2 && zone1 == zone3 && zone1 == zone4)
+                SetColorPicker(_lightEffectColorPicker, zone1);
+        }
+        // Neon often reports 0,0,0; preserve the user's selected color.
+        else if (mode != 2 || red != 0 || green != 0 || blue != 0)
             SetColorPicker(_lightEffectColorPicker, $"{red:X2}{green:X2}{blue:X2}");
     }
 
@@ -898,13 +906,19 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             {
                 var rgb = ToRgbHex(color);
 
-                await _client.SetPerZoneModeAsync(
+                var success = await _client.SetPerZoneModeAsync(
                     rgb,
                     rgb,
                     rgb,
                     rgb,
                     _keyboardBrightness
                 );
+
+                if (!success)
+                {
+                    await ShowMessageBox("Keyboard Lighting Error", "Failed to apply static keyboard lighting.");
+                    return;
+                }
 
                 SaveLightingEffectPresetFromUI(mode, direction, color);
 
