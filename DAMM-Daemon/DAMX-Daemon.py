@@ -32,6 +32,26 @@ CONFIG_PATH = "/etc/DAMX_Daemon/config.ini"
 PID_FILE = "/var/run/DAMX-Daemon.pid"
 MODPROBE_CONFIG_PATH = "/etc/modprobe.d/linuwu-sense.conf"
 
+# The acer-wmi platform device. Every driver built on the kernel's acer-wmi
+# registers it, linuwu_sense included, so its sysfs directory works whichever
+# module is loaded; /sys/module/<module>/drivers/platform:acer-wmi/acer-wmi is
+# only a link to it.
+ACER_WMI_DEVICE_PATH = "/sys/devices/platform/acer-wmi"
+DEFAULT_DRIVER_MODULE = "linuwu_sense"
+
+
+def detect_driver_module() -> str:
+    """Return the kernel module driving the acer-wmi device.
+
+    This is linuwu_sense for Linuwu-Sense, or acer_wmi for drivers such as
+    acer-wmi-linuwu that replace the in-tree module. Falls back to
+    linuwu_sense when the device is not bound to a module.
+    """
+    module_link = os.path.join(ACER_WMI_DEVICE_PATH, "driver", "module")
+    if os.path.exists(module_link):
+        return os.path.basename(os.path.realpath(module_link))
+    return DEFAULT_DRIVER_MODULE
+
 # Acer ENEK5130 HID RGB controller used by newer Nitro/Predator models where
 # linuwu_sense exposes RGB sysfs files but color writes do not affect hardware.
 ENEK5130_HID_ID = "HID_ID=0018:00000CF2:00005130"
@@ -97,11 +117,12 @@ class DAMXManager:
         '''The initial init (i know very nice description)'''
         log.info(f"** Starting DAMX-Daemon v{VERSION} **")
 
-        # Check if linuwu_sense is installed
-        if not os.path.exists("/sys/module/linuwu_sense"):
-            log.error("linuwu_sense module not found. Please install the linuwu_sense driver first.")
+        # Check that a driver has registered the acer-wmi device
+        self.driver_module = detect_driver_module()
+        if not os.path.exists(ACER_WMI_DEVICE_PATH):
+            log.error("acer-wmi device not found. Please install a driver that provides it, such as linuwu_sense, first.")
         else:
-            log.info("linuwu_sense module found. Proceeding with initialization.")
+            log.info(f"acer-wmi device found, driven by the {self.driver_module} module. Proceeding with initialization.")
         
         self.laptop_type = self._detect_laptop_type()
         # self.keyboard_monitor = None
@@ -113,7 +134,11 @@ class DAMXManager:
         if self.laptop_type == LaptopType.UNKNOWN:
             current_attempts = self._get_restart_attempts()
             
-            if current_attempts < self.MAX_RESTART_ATTEMPTS:
+            if self.driver_module != DEFAULT_DRIVER_MODULE:
+                # Restarting helps linuwu_sense, which can come up before its
+                # settings are ready; other modules gain nothing from it.
+                log.info(f"Not restarting {self.driver_module}, continuing with limited functionality")
+            elif current_attempts < self.MAX_RESTART_ATTEMPTS:
                 attempts = self._increment_restart_attempts()
                 log.warning(f"Unknown laptop type detected, attempting driver restart (attempt {attempts}/{self.MAX_RESTART_ATTEMPTS})...")
                 
@@ -180,20 +205,20 @@ class DAMXManager:
             log.error(f"Failed to reset restart counter: {e}")
 
     def _force_model_nitro(self):
-        """Restart linuwu-sense driver and DAMX daemon service with nitro_v4 parameter"""
+        """Restart the driver module and DAMX daemon service with nitro_v4 parameter"""
         log.info("Forcing model detection to Nitro by restarting drivers and daemon")
 
         try:
             # Remove the module
-            subprocess.run(['sudo', 'rmmod', 'linuwu_sense'], check=True)
-            log.info("Successfully removed linuwu-sense module")
+            subprocess.run(['sudo', 'rmmod', self.driver_module], check=True)
+            log.info(f"Successfully removed {self.driver_module} module")
             
             # Wait a moment
             time.sleep(2)
             
             # Reload the module
-            subprocess.run(['sudo', 'modprobe', 'linuwu_sense', 'nitro_v4'], check=True)
-            log.info("Successfully reloaded linuwu-sense module")
+            subprocess.run(['sudo', 'modprobe', self.driver_module, 'nitro_v4'], check=True)
+            log.info(f"Successfully reloaded {self.driver_module} module")
             
             # Wait a moment for module to initialize
             time.sleep(3)
@@ -210,20 +235,20 @@ class DAMXManager:
         
 
     def _force_model_predator(self):
-        """Restart linuwu-sense driver and DAMX daemon service with predator_v4 parameter"""
+        """Restart the driver module and DAMX daemon service with predator_v4 parameter"""
         log.info("Forcing model detection to Predator by restarting drivers and daemon")
 
         try:
             # Remove the module
-            subprocess.run(['sudo', 'rmmod', 'linuwu_sense'], check=True)
-            log.info("Successfully removed linuwu-sense module")
+            subprocess.run(['sudo', 'rmmod', self.driver_module], check=True)
+            log.info(f"Successfully removed {self.driver_module} module")
             
             # Wait a moment
             time.sleep(2)
             
             # Reload the module
-            subprocess.run(['sudo', 'modprobe', 'linuwu_sense', 'predator_v4'], check=True)
-            log.info("Successfully reloaded linuwu-sense module")
+            subprocess.run(['sudo', 'modprobe', self.driver_module, 'predator_v4'], check=True)
+            log.info(f"Successfully reloaded {self.driver_module} module")
 
             # Wait a moment for module to initialize
             time.sleep(3)
@@ -239,20 +264,24 @@ class DAMXManager:
             return False
 
     def _force_enable_all(self):
-        """Restart linuwu-sense driver and DAMX daemon service with enable_all parameter"""
+        """Restart the driver module and DAMX daemon service with enable_all parameter"""
         log.info("Forcing all features by restarting daemon and drivers with parameter enable_all")
+
+        if self.driver_module != "linuwu_sense":
+            log.error(f"enable_all is a linuwu_sense parameter; {self.driver_module} does not support it")
+            return False
 
         try:
             # Remove the module
-            subprocess.run(['sudo', 'rmmod', 'linuwu_sense'], check=True)
-            log.info("Successfully removed linuwu-sense module")
+            subprocess.run(['sudo', 'rmmod', self.driver_module], check=True)
+            log.info(f"Successfully removed {self.driver_module} module")
             
             # Wait a moment
             time.sleep(2)
             
             # Reload the module
-            subprocess.run(['sudo', 'modprobe', 'linuwu_sense', 'enable_all'], check=True)
-            log.info("Successfully reloaded linuwu-sense module with enable_all parameter")
+            subprocess.run(['sudo', 'modprobe', self.driver_module, 'enable_all'], check=True)
+            log.info(f"Successfully reloaded {self.driver_module} module with enable_all parameter")
             
             # Wait a moment for module to initialize
             time.sleep(3)
@@ -291,7 +320,7 @@ class DAMXManager:
             
             # Write the config file
             with open(MODPROBE_CONFIG_PATH, 'w') as f:
-                f.write(f"options linuwu_sense {param}=1\n")
+                f.write(f"options {self.driver_module} {param}=1\n")
                 f.flush()
                 os.fsync(f.fileno())  # Force write to disk
             
@@ -300,7 +329,7 @@ class DAMXManager:
             if os.path.exists(MODPROBE_CONFIG_PATH):
                 with open(MODPROBE_CONFIG_PATH, 'r') as f:
                     content = f.read().strip()
-                    expected = f"options linuwu_sense {param}=1"
+                    expected = f"options {self.driver_module} {param}=1"
                     if expected in content:
                         log.info(f"Successfully set modprobe parameter: {param}")
                         self.current_modprobe_param = param
@@ -350,6 +379,10 @@ class DAMXManager:
         if param not in ["nitro_v4", "predator_v4", "enable_all", ""]:
             log.error(f"Invalid modprobe parameter: {param}")
             return False
+
+        if param == "enable_all" and self.driver_module != "linuwu_sense":
+            log.error(f"enable_all is a linuwu_sense parameter; {self.driver_module} does not support it")
+            return False
         
         if param == "":
             # Remove parameter
@@ -380,7 +413,7 @@ class DAMXManager:
             if os.path.exists(MODPROBE_CONFIG_PATH):
                 with open(MODPROBE_CONFIG_PATH, 'r') as f:
                     content = f.read().strip()
-                    expected = f"options linuwu_sense {param}=1"
+                    expected = f"options {self.driver_module} {param}=1"
                     if expected in content:
                         log.info(f"Verification successful for parameter: {param}")
                         return True
@@ -412,21 +445,21 @@ class DAMXManager:
             
 
     def _restart_drivers_and_daemon(self):
-        """Restart linuwu-sense driver and DAMX daemon service"""
+        """Restart the driver module and DAMX daemon service"""
         attempts = self._get_restart_attempts()
         log.info(f"Attempting to restart drivers and daemon (attempt {attempts}/{self.MAX_RESTART_ATTEMPTS})...")
         
         try:
             # Remove the module
-            subprocess.run(['sudo', 'rmmod', 'linuwu_sense'], check=True)
-            log.info("Successfully removed linuwu-sense module")
+            subprocess.run(['sudo', 'rmmod', self.driver_module], check=True)
+            log.info(f"Successfully removed {self.driver_module} module")
             
             # Wait a moment
             time.sleep(2)
             
             # Reload the module
-            subprocess.run(['sudo', 'modprobe', 'linuwu_sense'], check=True)
-            log.info("Successfully reloaded linuwu-sense module")
+            subprocess.run(['sudo', 'modprobe', self.driver_module], check=True)
+            log.info(f"Successfully reloaded {self.driver_module} module")
             
             # Wait a moment for module to initialize
             time.sleep(3)
@@ -443,8 +476,8 @@ class DAMXManager:
             
     def _detect_laptop_type(self) -> LaptopType:
         """Detect whether this is a Predator or Nitro laptop"""
-        predator_path = "/sys/module/linuwu_sense/drivers/platform:acer-wmi/acer-wmi/predator_sense"
-        nitro_path = "/sys/module/linuwu_sense/drivers/platform:acer-wmi/acer-wmi/nitro_sense"
+        predator_path = os.path.join(ACER_WMI_DEVICE_PATH, "predator_sense")
+        nitro_path = os.path.join(ACER_WMI_DEVICE_PATH, "nitro_sense")
 
         if os.path.exists(predator_path):
             return LaptopType.PREDATOR
@@ -456,9 +489,9 @@ class DAMXManager:
     def _get_base_path(self) -> str:
         """Get the base path for VFS access based on laptop type"""
         if self.laptop_type == LaptopType.PREDATOR:
-            return "/sys/module/linuwu_sense/drivers/platform:acer-wmi/acer-wmi/predator_sense"
+            return os.path.join(ACER_WMI_DEVICE_PATH, "predator_sense")
         elif self.laptop_type == LaptopType.NITRO:
-            return "/sys/module/linuwu_sense/drivers/platform:acer-wmi/acer-wmi/nitro_sense"
+            return os.path.join(ACER_WMI_DEVICE_PATH, "nitro_sense")
         else:
             return ""
 
@@ -502,7 +535,7 @@ class DAMXManager:
 
         # Check keyboard features
         if self.has_four_zone_kb:
-            kb_base = "/sys/module/linuwu_sense/drivers/platform:acer-wmi/acer-wmi/four_zoned_kb"
+            kb_base = os.path.join(ACER_WMI_DEVICE_PATH, "four_zoned_kb")
             if os.path.exists(os.path.join(kb_base, "per_zone_mode")):
                 available.add("per_zone_mode")
             if os.path.exists(os.path.join(kb_base, "four_zone_mode")):
@@ -520,7 +553,7 @@ class DAMXManager:
     def _check_four_zone_kb(self) -> bool:
         """Check if four-zone keyboard is available"""
         if self.laptop_type != LaptopType.UNKNOWN:
-            kb_path = "/sys/module/linuwu_sense/drivers/platform:acer-wmi/acer-wmi/four_zoned_kb"
+            kb_path = os.path.join(ACER_WMI_DEVICE_PATH, "four_zoned_kb")
             return os.path.exists(kb_path)
         return False
 
@@ -860,7 +893,7 @@ class DAMXManager:
         if "per_zone_mode" not in self.available_features:
             return ""
 
-        return self._read_file("/sys/module/linuwu_sense/drivers/platform:acer-wmi/acer-wmi/four_zoned_kb/per_zone_mode")
+        return self._read_file(os.path.join(ACER_WMI_DEVICE_PATH, "four_zoned_kb", "per_zone_mode"))
 
     def set_per_zone_mode(self, zone1: str, zone2: str, zone3: str, zone4: str, brightness: int) -> bool:
         """Set per-zone mode configuration
@@ -896,7 +929,7 @@ class DAMXManager:
                 return True
 
         return self._write_file(
-            "/sys/module/linuwu_sense/drivers/platform:acer-wmi/acer-wmi/four_zoned_kb/per_zone_mode",
+            os.path.join(ACER_WMI_DEVICE_PATH, "four_zoned_kb", "per_zone_mode"),
             value
         )
 
@@ -905,7 +938,7 @@ class DAMXManager:
         if "four_zone_mode" not in self.available_features:
             return ""
 
-        return self._read_file("/sys/module/linuwu_sense/drivers/platform:acer-wmi/acer-wmi/four_zoned_kb/four_zone_mode")
+        return self._read_file(os.path.join(ACER_WMI_DEVICE_PATH, "four_zoned_kb", "four_zone_mode"))
 
     def set_four_zone_mode(self, mode: int, speed: int, brightness: int,
                            direction: int, red: int, green: int, blue: int) -> bool:
@@ -952,7 +985,7 @@ class DAMXManager:
                 return True
 
         return self._write_file(
-            "/sys/module/linuwu_sense/drivers/platform:acer-wmi/acer-wmi/four_zoned_kb/four_zone_mode",
+            os.path.join(ACER_WMI_DEVICE_PATH, "four_zoned_kb", "four_zone_mode"),
             value
         )
 
