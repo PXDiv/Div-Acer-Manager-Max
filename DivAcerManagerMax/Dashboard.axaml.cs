@@ -883,7 +883,7 @@ public partial class Dashboard : UserControl, INotifyPropertyChanged
 
             // Get GPU temperature
             var tempOutput = RunCommand("nvidia-smi", "--query-gpu=temperature.gpu --format=csv,noheader");
-            if (double.TryParse(tempOutput.Trim(), out temp))
+            if (double.TryParse(tempOutput.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out temp))
             {
                 // temperature is already in celsius
             }
