@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 DAMX Build and Package Automation Script
-Builds and packages the complete DAMX suite including daemon, GUI, and drivers.
+Builds and packages the complete DAMX suite including daemon, GUI, CLI, and drivers.
 to use it put this script outside the Div-Acer-Manager Folder and have Div-Linuwu-Sense next to it
 used for internal local packaging
 """
@@ -22,13 +22,14 @@ class DAMXBuilder:
         self.base_dir = script_path
         self.daemon_dir = self.base_dir / "Div-Acer-Manager-Max" / "DAMM-Daemon"
         self.gui_dir = self.base_dir / "Div-Acer-Manager-Max" / "DivAcerManagerMax"
+        self.cli_dir = self.base_dir / "Div-Acer-Manager-Max" / "DivAcerManagerMax-CLI"
         self.drivers_dir = self.base_dir / "Div-Linuwu-Sense"
         self.publish_dir = self.base_dir / "Publish"
         self.setup_script = self.base_dir / "Div-Acer-Manager-Max/scripts/local-setup.sh"
         # self.setup_signed_script = self.base_dir / "Div-Acer-Manager-Max/Scripts/build_sign_install.sh"
 
 
-        # Icon files to copy
+        # Icon files to copy (GUI package only; the CLI is terminal-only)
         self.icon_files = [
             self.gui_dir / "icon.png",
             Path( self.base_dir  / "Div-Acer-Manager-Max/DivAcerManagerMax/iconTransparent.png")
@@ -39,6 +40,7 @@ class DAMXBuilder:
         print(f"Looking for:")
         print(f"  - Daemon: {self.daemon_dir}")
         print(f"  - GUI: {self.gui_dir}")
+        print(f"  - CLI: {self.cli_dir}")
         print(f"  - Drivers: {self.drivers_dir}")
         print(f"  - Setup script: {self.setup_script}")
         print(f"  - Icon files: {[str(f) for f in self.icon_files]}")
@@ -52,6 +54,12 @@ class DAMXBuilder:
         project_version = self._detect_project_version()
         if not project_version:
             print("Error: Could not detect project version!")
+            sys.exit(1)
+
+        # Detect CLI version
+        cli_version = self._detect_cli_version()
+        if not cli_version:
+            print("Error: Could not detect CLI version!")
             sys.exit(1)
             
         # Detect daemon version
@@ -68,12 +76,14 @@ class DAMXBuilder:
             
         print(f"Detected versions:")
         print(f"  - Project: {project_version}")
+        print(f"  - CLI: {cli_version}")
         print(f"  - Daemon: {daemon_version}")
         print(f"  - Drivers: {drivers_version}")
         print()
             
         return {
             'project': project_version,
+            'cli': cli_version,
             'daemon': daemon_version,
             'drivers': drivers_version
         }
@@ -94,6 +104,28 @@ class DAMXBuilder:
             if match:
                 return match.group(1)
                 
+            print(f"Warning: Could not find ProjectVersion in {version_file}")
+            return None
+        except Exception as e:
+            print(f"Error reading version file: {e}")
+            return None
+
+    def _detect_cli_version(self):
+        """Detect CLI version from CLI source file"""
+        version_file = self.cli_dir / "Cli" / "AppInfo.cs"
+        if not version_file.exists():
+            print(f"Warning: Could not find version file at {version_file}")
+            return None
+
+        try:
+            with open(version_file, 'r') as f:
+                content = f.read()
+
+            # Match: public const string ProjectVersion = "1.0.2";
+            match = re.search(r'public const string ProjectVersion\s*=\s*"([\d.]+)"', content)
+            if match:
+                return match.group(1)
+
             print(f"Warning: Could not find ProjectVersion in {version_file}")
             return None
         except Exception as e:
@@ -152,6 +184,8 @@ class DAMXBuilder:
             missing.append(f"Daemon directory: {self.daemon_dir}")
         if not self.gui_dir.exists():
             missing.append(f"GUI directory: {self.gui_dir}")
+        if not self.cli_dir.exists():
+            missing.append(f"CLI directory: {self.cli_dir}")
         if not self.drivers_dir.exists():
             missing.append(f"Drivers directory: {self.drivers_dir}")
         if not self.setup_script.exists():
@@ -260,6 +294,45 @@ class DAMXBuilder:
             sys.exit(1)
         finally:
             os.chdir(original_cwd)
+
+    def build_cli(self):
+        """Build the .NET CLI application"""
+        print("\n=== Building CLI ===")
+
+        if not (self.cli_dir / "DivAcerManagerMax-cli.csproj").exists():
+            # Try to find any .csproj file
+            csproj_files = list(self.cli_dir.glob("*.csproj"))
+            if not csproj_files:
+                print(f"Error: No .csproj file found in {self.cli_dir}")
+                sys.exit(1)
+
+        # Change to CLI directory
+        original_cwd = os.getcwd()
+        os.chdir(self.cli_dir)
+
+        try:
+            cmd = [
+                "dotnet", "publish",
+                "-c", "Release",
+                "-f", "net9.0",
+                "-r", "linux-x64",
+                "--self-contained", "true",
+                "/p:PublishSingleFile=true",
+                "/p:IncludeNativeLibrariesForSelfExtract=true",
+                "/p:IncludeAllContentForSelfExtract=true"
+            ]
+
+            print(f"Running: {' '.join(cmd)}")
+            result = subprocess.run(cmd, check=True, capture_output=True, text=True)
+            print("✓ CLI built successfully")
+
+        except subprocess.CalledProcessError as e:
+            print(f"Error building CLI: {e}")
+            print(f"stdout: {e.stdout}")
+            print(f"stderr: {e.stderr}")
+            sys.exit(1)
+        finally:
+            os.chdir(original_cwd)
     
     def create_package_structure(self, version):
         """Create the package directory structure"""
@@ -276,13 +349,15 @@ class DAMXBuilder:
         package_dir.mkdir(parents=True, exist_ok=True)
         daemon_target = package_dir / "DAMX-Daemon"
         gui_target = package_dir / "DAMX-GUI"
+        cli_target = package_dir / "DAMX-CLI"
         drivers_target = package_dir / "Linuwu-Sense"
-        
+
         daemon_target.mkdir(exist_ok=True)
         gui_target.mkdir(exist_ok=True)
-        
+        cli_target.mkdir(exist_ok=True)
+
         print(f"✓ Created package directory: {package_dir}")
-        return package_dir, daemon_target, gui_target, drivers_target
+        return package_dir, daemon_target, gui_target, cli_target, drivers_target
     
     def copy_daemon_executable(self, daemon_target):
         """Copy the built daemon executable"""
@@ -334,6 +409,34 @@ class DAMXBuilder:
                 print(f"✓ Copied icon: {icon_file.name}")
             else:
                 print(f"Warning: Icon file not found: {icon_file}")
+
+    def copy_cli_executable(self, cli_target):
+        """Copy the built CLI executable (terminal-only: binary alone, no icons)"""
+        print("Copying CLI executable...")
+
+        # Find the published CLI executable
+        cli_publish_dir = self.cli_dir / "bin" / "Release" / "net9.0" / "linux-x64" / "publish"
+
+        if not cli_publish_dir.exists():
+            print(f"Error: CLI publish directory not found at {cli_publish_dir}")
+            sys.exit(1)
+
+        # Find the main executable (DivAcerManagerMax-CLI, single file, no .dll)
+        executables = [f for f in cli_publish_dir.iterdir() if f.is_file() and f.stat().st_mode & 0o111]
+
+        if not executables:
+            print(f"Error: No executable found in {cli_publish_dir}")
+            sys.exit(1)
+
+        # Use the first executable found (or look for specific name)
+        cli_executable = executables[0]
+        for exe in executables:
+            if "DivAcerManagerMax-CLI" in exe.name:
+                cli_executable = exe
+                break
+
+        shutil.copy2(cli_executable, cli_target / "DivAcerManagerMax-CLI")
+        print(f"✓ CLI executable copied: {cli_executable.name}")
     
     def copy_drivers(self, drivers_target):
         """Copy the drivers directory"""
@@ -363,6 +466,7 @@ class DAMXBuilder:
         # Update version information (basic replacement)
         # You may need to adjust these patterns based on your setup.sh structure
         content = content.replace("PROJECT_VERSION=", f"PROJECT_VERSION={versions['project']}")
+        content = content.replace("CLI_VERSION=", f"CLI_VERSION={versions['cli']}")
         content = content.replace("DAEMON_VERSION=", f"DAEMON_VERSION={versions['daemon']}")
         content = content.replace("DRIVERS_VERSION=", f"DRIVERS_VERSION={versions['drivers']}")
         
@@ -417,6 +521,7 @@ class DAMXBuilder:
 ========================
 
 Project Version: {versions['project']}
+CLI Version: {versions['cli']}
 Daemon Version: {versions['daemon']}
 Drivers Version: {versions['drivers']}
 
@@ -426,6 +531,7 @@ Built on: {subprocess.check_output(['uname', '-a'], text=True).strip()}
 Components:
 - DAMX-Daemon: Python daemon compiled with PyInstaller
 - DAMX-GUI: .NET 9.0 GUI application (self-contained)
+- DAMX-CLI: .NET 9.0 CLI application (self-contained, `damx` command)
 - Linuwu-Sense: Hardware drivers
 - setup.sh: Installation script
 """
@@ -449,13 +555,15 @@ Components:
         # Build components
         self.build_daemon()
         self.build_gui()
-        
+        self.build_cli()
+
         # Create package structure
-        package_dir, daemon_target, gui_target, drivers_target = self.create_package_structure(versions['project'])
-        
+        package_dir, daemon_target, gui_target, cli_target, drivers_target = self.create_package_structure(versions['project'])
+
         # Copy all components
         self.copy_daemon_executable(daemon_target)
         self.copy_gui_executable(gui_target)
+        self.copy_cli_executable(cli_target)
         self.copy_drivers(drivers_target)
         
         # Update setup script and create release info

@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <TargetFramework>net9.0</TargetFramework>
+        <Nullable>enable</Nullable>
+        <ImplicitUsings>disable</ImplicitUsings>
+        <RootNamespace>DivAcerManagerMax</RootNamespace>
+        <Description>Shared daemon-protocol client (DAMXClient) used by the DAMX GUI and CLI.</Description>
+    </PropertyGroup>
+
+</Project>

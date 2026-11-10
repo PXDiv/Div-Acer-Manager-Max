@@ -71,6 +71,10 @@ jobs:
         # Detect GUI version
         GUI_VERSION=$(grep -oP 'private const string ProjectVersion\s*=\s*"\K[\d.]+' Div-Acer-Manager-Max/DivAcerManagerMax/MainWindow.axaml.cs || echo "unknown")
         echo "gui_version=$GUI_VERSION" >> $GITHUB_OUTPUT
+
+        # Detect CLI version
+        CLI_VERSION=$(grep -oP 'public const string ProjectVersion\s*=\s*"\K[\d.]+' Div-Acer-Manager-Max/DivAcerManagerMax-CLI/Cli/AppInfo.cs || echo "unknown")
+        echo "cli_version=$CLI_VERSION" >> $GITHUB_OUTPUT
         
         # Detect daemon version  
         DAEMON_VERSION=$(grep -oP 'VERSION\s*=\s*"\K[\d.]+' Div-Acer-Manager-Max/DAMM-Daemon/DAMX-Daemon.py || echo "unknown")
@@ -87,6 +91,7 @@ jobs:
         
         echo "Detected versions:"
         echo "  GUI: $GUI_VERSION"
+        echo "  CLI: $CLI_VERSION"
         echo "  Daemon: $DAEMON_VERSION" 
         echo "  Drivers: $DRIVERS_VERSION (${{ inputs.drivers_version }})"
     
@@ -121,6 +126,22 @@ jobs:
         echo "✓ GUI built successfully"
         ls -la bin/Release/net9.0/linux-x64/publish/
     
+    - name: Build .NET CLI
+      run: |
+        cd Div-Acer-Manager-Max/DivAcerManagerMax-CLI
+        
+        dotnet publish \
+          -c Release \
+          -f net9.0 \
+          -r linux-x64 \
+          --self-contained true \
+          /p:PublishSingleFile=true \
+          /p:IncludeNativeLibrariesForSelfExtract=true \
+          /p:IncludeAllContentForSelfExtract=true
+        
+        echo "✓ CLI built successfully"
+        ls -la bin/Release/net9.0/linux-x64/publish/
+    
     - name: Create Package Structure
       run: |
         # Use GUI version as main package version
@@ -128,7 +149,7 @@ jobs:
         PACKAGE_DIR="DAMX-${PACKAGE_VERSION}"
         
         echo "Creating package directory: $PACKAGE_DIR"
-        mkdir -p "$PACKAGE_DIR"/{DAMX-Daemon,DAMX-GUI,Linuwu-Sense}
+        mkdir -p "$PACKAGE_DIR"/{DAMX-Daemon,DAMX-GUI,DAMX-CLI,Linuwu-Sense}
         
         echo "package_dir=$PACKAGE_DIR" >> $GITHUB_ENV
         echo "package_version=$PACKAGE_VERSION" >> $GITHUB_ENV
@@ -162,6 +183,20 @@ jobs:
         
         echo "✓ GUI executable and icons copied"
     
+    - name: Copy CLI Executable
+      run: |
+        # Copy the main executable (damx command, terminal-only: no icons)
+        find Div-Acer-Manager-Max/DivAcerManagerMax-CLI/bin/Release/net9.0/linux-x64/publish/ -type f -executable -name "*DivAcerManagerMax-CLI*" -exec cp {} "${{ env.package_dir }}/DAMX-CLI/DivAcerManagerMax-CLI" \;
+        
+        # If no specific executable found, copy the first executable
+        if [ ! -f "${{ env.package_dir }}/DAMX-CLI/DivAcerManagerMax-CLI" ]; then
+          find Div-Acer-Manager-Max/DivAcerManagerMax-CLI/bin/Release/net9.0/linux-x64/publish/ -type f -executable | head -1 | xargs -I {} cp {} "${{ env.package_dir }}/DAMX-CLI/DivAcerManagerMax-CLI"
+        fi
+        
+        chmod +x "${{ env.package_dir }}/DAMX-CLI/DivAcerManagerMax-CLI"
+        
+        echo "✓ CLI executable copied"
+    
     - name: Copy Drivers
       run: |
         cp -r drivers-temp/* "${{ env.package_dir }}/Linuwu-Sense/"
@@ -181,6 +216,7 @@ jobs:
         # Update version information in setup script
         sed -i "s/SCRIPT_VERSION\s*=\s*\".*\"/SCRIPT_VERSION=\"${{ steps.versions.outputs.gui_version }}\"/g" "${{ env.package_dir }}/setup.sh"
         sed -i "s/PROJECT_VERSION\s*=\s*.*/PROJECT_VERSION=${{ steps.versions.outputs.gui_version }}/g" "${{ env.package_dir }}/setup.sh"
+        sed -i "s/CLI_VERSION\s*=\s*.*/CLI_VERSION=${{ steps.versions.outputs.cli_version }}/g" "${{ env.package_dir }}/setup.sh"
         sed -i "s/DAEMON_VERSION\s*=\s*.*/DAEMON_VERSION=${{ steps.versions.outputs.daemon_version }}/g" "${{ env.package_dir }}/setup.sh"
         sed -i "s/DRIVERS_VERSION\s*=\s*.*/DRIVERS_VERSION=${{ steps.versions.outputs.drivers_version }}/g" "${{ env.package_dir }}/setup.sh"
         
@@ -203,7 +239,9 @@ jobs:
         for function_name in \
           is_llvm_kernel \
           prepare_secure_boot_signing \
-          sign_driver_module
+          sign_driver_module \
+          install_gui \
+          install_cli
         do
           if ! grep -Eq "^${function_name}\\(\\)[[:space:]]*\\{" "$SETUP_SCRIPT"; then
             echo "Error: setup.sh is missing ${function_name}()"
@@ -220,6 +258,7 @@ jobs:
         ========================
         
         Project Version: ${{ steps.versions.outputs.gui_version }}
+        CLI Version: ${{ steps.versions.outputs.cli_version }}
         Daemon Version: ${{ steps.versions.outputs.daemon_version }}
         Drivers Version: ${{ steps.versions.outputs.drivers_version }}
         
@@ -231,6 +270,7 @@ jobs:
         Components:
         - DAMX-Daemon: Python daemon compiled with PyInstaller
         - DAMX-GUI: .NET 9.0 GUI application (self-contained)
+        - DAMX-CLI: .NET 9.0 CLI application (self-contained, damx command)
         - Linuwu-Sense: Hardware drivers
         - setup.sh: Installation script
         - nitro-key-detection.sh: Nitro key detection helper script
@@ -283,6 +323,7 @@ jobs:
           
           ## Version Information
           - **Project Version**: ${{ steps.versions.outputs.gui_version }}
+          - **CLI Version**: ${{ steps.versions.outputs.cli_version }}
           - **Daemon Version**: ${{ steps.versions.outputs.daemon_version }}
           - **Drivers Version**: ${{ steps.versions.outputs.drivers_version }}
           - **Drivers Type**: ${{ steps.versions.outputs.drivers_type }}
@@ -290,6 +331,7 @@ jobs:
           ## Components
           - **DAMX-Daemon**: Python daemon compiled with PyInstaller
           - **DAMX-GUI**: .NET 9.0 GUI application (self-contained, linux-x64)
+          - **DAMX-CLI**: .NET 9.0 CLI application (self-contained, linux-x64, `damx` command)
           - **Linuwu-Sense**: Hardware drivers (${{ steps.versions.outputs.drivers_type }})
           - **setup.sh**: Installation script
           - **nitro-key-detection.sh**: Nitro key detection helper script

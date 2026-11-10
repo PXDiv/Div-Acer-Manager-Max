@@ -59,7 +59,7 @@ jobs:
 
       - name: Publish .NET GUI application
         run: |
-          dotnet publish \
+          dotnet publish DivAcerManagerMax/DivAcerManagerMax.csproj \
             -c Release \
             -f net9.0 \
             -r linux-x64 \
@@ -68,7 +68,20 @@ jobs:
             /p:IncludeNativeLibrariesForSelfExtract=true \
             /p:IncludeAllContentForSelfExtract=true \
             /p:DeleteExistingFiles=true \
-            -o ./publish
+            -o ./publish-gui
+
+      - name: Publish .NET CLI application
+        run: |
+          dotnet publish DivAcerManagerMax-CLI/DivAcerManagerMax-cli.csproj \
+            -c Release \
+            -f net9.0 \
+            -r linux-x64 \
+            --self-contained true \
+            /p:PublishSingleFile=true \
+            /p:IncludeNativeLibrariesForSelfExtract=true \
+            /p:IncludeAllContentForSelfExtract=true \
+            /p:DeleteExistingFiles=true \
+            -o ./publish-cli
 
       - name: Build DAMX-Daemon Python binary
         run: |
@@ -77,33 +90,47 @@ jobs:
       - name: Prepare release folder structure
         run: |
           mkdir -p ./release/DAMX-GUI
+          mkdir -p ./release/DAMX-CLI
           mkdir -p ./release/DAMX-Daemon
 
           # GUI: Copy main binary and icons
-          BIN=$(find ./publish -maxdepth 1 -type f -executable -name 'DivAcerManagerMax*' ! -name '*.pdb' | head -n1)
+          BIN=$(find ./publish-gui -maxdepth 1 -type f -executable -name 'DivAcerManagerMax' ! -name '*.pdb' | head -n1)
           cp "$BIN" ./release/DAMX-GUI/
           cp DivAcerManagerMax/icon.png ./release/DAMX-GUI/
           cp DivAcerManagerMax/iconTransparent.png ./release/DAMX-GUI/
+
+          # CLI: Copy main binary (`damx` command, terminal-only, no icons)
+          CLI_BIN=$(find ./publish-cli -maxdepth 1 -type f -executable -name 'DivAcerManagerMax-CLI' ! -name '*.pdb' | head -n1)
+          cp "$CLI_BIN" ./release/DAMX-CLI/
 
           # Daemon: Copy only the pyinstaller binary
           DAEMON_BIN=$(find ./DaemonPublish -maxdepth 1 -type f -executable -name 'DAMX-Daemon*' ! -name '*.py' | head -n1)
           cp "$DAEMON_BIN" ./release/DAMX-Daemon/
 
           # PDB: If present, copy for separate archive
-          if [ -f ./publish/DivAcerManagerMax.pdb ]; then
-            cp ./publish/DivAcerManagerMax.pdb ./release/
+          if [ -f ./publish-gui/DivAcerManagerMax.pdb ]; then
+            cp ./publish-gui/DivAcerManagerMax.pdb ./release/
+          fi
+          if [ -f ./publish-cli/DivAcerManagerMax-CLI.pdb ]; then
+            cp ./publish-cli/DivAcerManagerMax-CLI.pdb ./release/
           fi
 
-      - name: Package release archive (GUI + Daemon)
+      - name: Package release archive (GUI + CLI + Daemon)
         run: |
-          tar -C ./release -cf DAMX-${{ github.event.inputs.tag }}.tar DAMX-GUI DAMX-Daemon
+          tar -C ./release -cf DAMX-${{ github.event.inputs.tag }}.tar DAMX-GUI DAMX-CLI DAMX-Daemon
           xz -9e --threads=0 DAMX-${{ github.event.inputs.tag }}.tar
 
       - name: Package PDB (if present)
         run: |
+          rm -f DivAcerManagerMax-symbols.tar
           if [ -f ./release/DivAcerManagerMax.pdb ]; then
-            tar -C ./release -cf DivAcerManagerMax.pdb.tar DivAcerManagerMax.pdb
-            xz -9e --threads=0 DivAcerManagerMax.pdb.tar
+            tar -C ./release -rf DivAcerManagerMax-symbols.tar DivAcerManagerMax.pdb
+          fi
+          if [ -f ./release/DivAcerManagerMax-CLI.pdb ]; then
+            tar -C ./release -rf DivAcerManagerMax-symbols.tar DivAcerManagerMax-CLI.pdb
+          fi
+          if [ -f DivAcerManagerMax-symbols.tar ]; then
+            xz -9e --threads=0 DivAcerManagerMax-symbols.tar
           fi
 
       - name: Upload DAMX archive
@@ -113,11 +140,11 @@ jobs:
           path: DAMX-${{ github.event.inputs.tag }}.tar.xz
 
       - name: Upload PDB archive (if present)
-        if: ${{ hashFiles('DivAcerManagerMax.pdb.tar.xz') != '' }}
+        if: ${{ hashFiles('DivAcerManagerMax-symbols.tar.xz') != '' }}
         uses: actions/upload-artifact@v4
         with:
-          name: DivAcerManagerMax-pdb
-          path: DivAcerManagerMax.pdb.tar.xz
+          name: DivAcerManagerMax-symbols
+          path: DivAcerManagerMax-symbols.tar.xz
 
   release:
     needs: build
@@ -133,7 +160,7 @@ jobs:
         if: always()
         uses: actions/download-artifact@v4
         with:
-          name: DivAcerManagerMax-pdb
+          name: DivAcerManagerMax-symbols
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -143,7 +170,7 @@ jobs:
           prerelease: ${{ github.event.inputs.prerelease }}
           files: |
             DAMX-${{ github.event.inputs.tag }}.tar.xz
-            DivAcerManagerMax.pdb.tar.xz
+            DivAcerManagerMax-symbols.tar.xz
           token: ${{ secrets.GH_PAT_RELEASE }}
 
 

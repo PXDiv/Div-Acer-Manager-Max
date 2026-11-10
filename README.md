@@ -6,7 +6,7 @@
   Div Acer Manager Max
 </h1>
 
-**Div Acer Manager Max** is a feature-rich Linux GUI utility for Acer laptops powered by the incredible [Linuwu Sense](https://github.com/0x7375646F/Linuwu-Sense) drivers. It replicates and expands on Acer’s NitroSense and PredatorSense capabilities on Linux with full fan control, performance modes, battery optimization, backlight settings, and more — all wrapped in a modern Avalonia-based UI.
+**Div Acer Manager Max** is a feature-rich Linux utility suite for Acer laptops powered by the incredible [Linuwu Sense](https://github.com/0x7375646F/Linuwu-Sense) drivers. It replicates and expands on Acer’s NitroSense and PredatorSense capabilities on Linux with full fan control, performance modes, battery optimization, backlight settings, and more — available both as a modern Avalonia-based GUI (`DAMX`) and as a terminal CLI (`damx`).
 
 > [!CAUTION]
 > Project is under passive development.
@@ -49,12 +49,19 @@
   * Can run **independently** of GUI
   * Recursive restart to fix software issues similar to those on Windows
 
-* 🖥️ **Modern GUI**
+* 🖥️ **Modern GUI (`DAMX` command)**
 
   * Avalonia-based, clean and responsive
   * Realtime Monitoring with Dashboard and accurate Tempreature Readings
   * Dynamic UI hides unsupported features
   * Real-time feedback from daemon
+
+* ⌨️ **Terminal CLI (`damx` command)**
+
+  * Same features as the GUI, no graphical dependencies — works over SSH, tmux, anywhere
+  * Human-readable output plus `--json` for scripting
+  * Live local monitoring (`damx monitor`) with temperature/fan/battery readings
+  * Both clients talk to the same daemon and can run side by side
 
 ## 🧭 Compatibility
 
@@ -85,14 +92,37 @@ Check your device's compatibility here: [Compatibility List](https://github.com/
 
 5. When prompted, choose an option from the menu:
 
-   * `1` → Install
-   * `2` → Install without Drivers
+   * `1` → Install complete (GUI + CLI)
+   * `2` → Install without Drivers (GUI + CLI)
    * `3` → Uninstall
-   * `4` → Reinstall/Update
+   * `4` → Reinstall/Update (GUI + CLI)
+   * `5` → Check service status
+   * `6` → Install CLI only (`damx` command)
+   * `7` → Install GUI only (`DAMX`)
 
 6. Reboot your system after the installation completes.
 
 ✅ That’s it—you’re all set!
+
+## ⌨️ CLI Usage (`damx`)
+
+The CLI exposes every GUI feature in the terminal:
+
+```bash
+damx status                              # everything (profiles, fans, battery, versions)
+damx profile set turbo                   # eco | quiet | balanced | performance | turbo
+damx fan set --cpu 60 --gpu 80           # 0 = Auto, 100 = Max (also: fan auto|max|get)
+damx battery limiter on                  # limit charge to 80%
+damx battery calibration start           # start|stop|status
+damx usb set 20                          # 0, 10, 20 or 30
+damx kbd zone --z1 FF0000 --z2 00FF00 --z3 0000FF --z4 FFFF00 --brightness 100
+damx kbd effect --mode breathing --color 0078D7 --speed 5
+damx system lcd on / damx system boot off
+damx monitor --once                      # local sensors (CPU/GPU/RAM/battery/fans)
+damx daemon logs -n 50                   # daemon logs
+damx --json status                       # machine-readable output for scripts
+damx help <comando>                      # help per command
+```
 
 ## 🔘 Nitro / PredatorSense Button
 
