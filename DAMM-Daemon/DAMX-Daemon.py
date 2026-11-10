@@ -22,7 +22,7 @@ from pathlib import Path
 from enum import Enum
 from PowerSourceDetection import PowerSourceDetector 
 from typing import Dict, List, Tuple, Set
-# from KeyboardMonitor import KeyboardMonitor
+from KeyboardMonitor import KeyboardMonitor
 
 # Constants
 VERSION = "0.5.2"
@@ -1578,16 +1578,14 @@ class DAMXDaemon:
             log.info(f"Driver Version: {self.manager.get_driver_version()}")
 
             # Initialize keyboard monitor early
-            # self.keyboard_monitor = KeyboardMonitor(
-            #     target_keycode=425, 
-            #     command_to_run="DAMX",  # Updated command
-            #     logger=log
-            # )
-            # kb_success = self.keyboard_monitor.start_monitoring()
+            self.keyboard_monitor = KeyboardMonitor(
+                manager=self.manager, 
+                logger=log
+            )
+            kb_success = self.keyboard_monitor.start_monitoring()
             
-            # if not kb_success:
-            #     log.error("Failed to start keyboard monitoring")
-            #     # Don't return False here - continue with reduced functionality
+            if not kb_success:
+                log.error("Failed to start keyboard monitoring")
 
             # Initialize power monitor (started in run())
             self.power_monitor = PowerSourceDetector(self.manager)
