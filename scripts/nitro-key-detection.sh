@@ -47,71 +47,130 @@ fi
 
 USER_ID=$(id -u "$TARGET_USER")
 
-DISPLAY=""
-XAUTHORITY=""
-WAYLAND_DISPLAY=""
-
-# Wait (up to 60s) for a target-user process with useful graphical session env.
-for _ in $(seq 1 60); do
-    while IFS= read -r pid; do
-        if [ -r "/proc/$pid/environ" ]; then
-            ENV_DISPLAY=$(tr '\0' '\n' < "/proc/$pid/environ" 2>/dev/null | grep '^DISPLAY=' | cut -d= -f2- || true)
-            ENV_WAYLAND=$(tr '\0' '\n' < "/proc/$pid/environ" 2>/dev/null | grep '^WAYLAND_DISPLAY=' | cut -d= -f2- || true)
-            ENV_XAUTH=$(tr '\0' '\n' < "/proc/$pid/environ" 2>/dev/null | grep '^XAUTHORITY=' | cut -d= -f2- || true)
-
-            if [ -n "$ENV_DISPLAY" ]; then
-                DISPLAY="$ENV_DISPLAY"
-            fi
-            if [ -n "$ENV_WAYLAND" ]; then
-                WAYLAND_DISPLAY="$ENV_WAYLAND"
-            fi
-            if [ -n "$ENV_XAUTH" ] && [ -f "$ENV_XAUTH" ]; then
-                XAUTHORITY="$ENV_XAUTH"
-            fi
-
-            if [ -n "$DISPLAY" ] || [ -n "$WAYLAND_DISPLAY" ]; then
-                break 2
-            fi
+# systemctl show-environment emits plain values or $'...' strings. Decode
+# only that data format; never evaluate shell syntax from a user's environment.
+decode_environment_value() {
+    local encoded="$1" char escape
+    local -n decoded_value="$2"
+    decoded_value=""
+    if [[ "$encoded" != \$\'* ]]; then
+        decoded_value="$encoded"
+        return 0
+    fi
+    [[ "$encoded" == *\' && ${#encoded} -ge 3 ]] || return 1
+    encoded="${encoded:2:-1}"
+    while [ -n "$encoded" ]; do
+        char="${encoded:0:1}"
+        encoded="${encoded:1}"
+        if [ "$char" = "\\" ]; then
+            escape="${encoded:0:1}"
+            encoded="${encoded:1}"
+            case "$escape" in
+                "'"|'"'|"\\") char="$escape" ;;
+                a|b|f|n|r|t|v) printf -v char '%b' "\\$escape" ;;
+                [0-3])
+                    encoded="$escape$encoded"
+                    [[ "$encoded" =~ ^([0-3][0-7]{2}) ]] || return 1
+                    [ "${BASH_REMATCH[1]}" != 000 ] || return 1
+                    printf -v char '%b' "\\0${BASH_REMATCH[1]}"
+                    encoded="${encoded:3}"
+                    ;;
+                *) return 1 ;;
+            esac
         fi
-    done < <(pgrep -u "$TARGET_USER" || true)
-    sleep 1
-done
+        decoded_value+="$char"
+    done
+}
 
-# If no XAUTHORITY var was found in environ, fall back to common locations.
-if [ -z "$XAUTHORITY" ]; then
-    for candidate in "/run/user/$USER_ID/gdm/Xauthority" "/home/$TARGET_USER/.Xauthority" /run/user/$USER_ID/.mutter-Xwaylandauth.*; do
-        if [ -f "$candidate" ]; then
-            XAUTHORITY="$candidate"
+# Resolve credentials for each key press: the service can start before login,
+# and a later login can replace the display and its authorization file.
+load_session_environment() {
+    local session_id session_info session_type session_active
+    local session_ids session_env key value graphical_session=false
+    DISPLAY=""
+    WAYLAND_DISPLAY=""
+    XAUTHORITY=""
+    XDG_RUNTIME_DIR="/run/user/$USER_ID"
+    DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus"
+
+    if ! session_ids=$(loginctl list-sessions --no-legend 2>/dev/null); then
+        echo "Skipping launch: could not query login sessions."
+        return 1
+    fi
+    while read -r session_id; do
+        [ -n "$session_id" ] || continue
+        session_type=""
+        session_active=""
+        if ! session_info=$(loginctl show-session "$session_id" \
+            --property=Type --property=Active 2>/dev/null); then
+            continue
+        fi
+        while IFS='=' read -r key value; do
+            case "$key" in
+                Type) session_type="$value" ;;
+                Active) session_active="$value" ;;
+            esac
+        done <<< "$session_info"
+        if [ "$session_active" = "yes" ] &&
+            { [ "$session_type" = "wayland" ] || [ "$session_type" = "x11" ]; }; then
+            graphical_session=true
             break
         fi
-    done
-fi
+    done < <(awk -v uid="$USER_ID" '$2 == uid { print $1 }' <<< "$session_ids")
 
-: "${DISPLAY:=:0}"
-: "${WAYLAND_DISPLAY:=wayland-0}"
+    if [ "$graphical_session" != true ]; then
+        echo "Skipping launch: no active graphical session for $TARGET_USER."
+        return 1
+    fi
 
-if [ -z "$XAUTHORITY" ] || [ ! -f "$XAUTHORITY" ]; then
-    echo "Warning: could not find a valid XAUTHORITY file."
-fi
+    # Query the user's manager, never source/eval the returned environment.
+    if ! session_env=$(sudo -u "$TARGET_USER" env \
+        XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" \
+        DBUS_SESSION_BUS_ADDRESS="$DBUS_SESSION_BUS_ADDRESS" \
+        timeout 5s systemctl --user show-environment 2>/dev/null); then
+        echo "Skipping launch: could not read the user-session environment."
+        return 1
+    fi
+    while IFS='=' read -r key value; do
+        case "$key" in
+            DISPLAY|WAYLAND_DISPLAY|XAUTHORITY)
+                if ! decode_environment_value "$value" value; then
+                    echo "Skipping launch: invalid encoding for $key."
+                    return 1
+                fi
+                ;;
+            *) continue ;;
+        esac
+        case "$key" in
+            DISPLAY) DISPLAY="$value" ;;
+            WAYLAND_DISPLAY) WAYLAND_DISPLAY="$value" ;;
+            XAUTHORITY) XAUTHORITY="$value" ;;
+        esac
+    done <<< "$session_env"
 
-export DISPLAY
-export WAYLAND_DISPLAY
-export XAUTHORITY
-export XDG_RUNTIME_DIR="/run/user/$USER_ID"
-export DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$USER_ID/bus"
+    # This DAMX build uses X11, including XWayland on a Wayland desktop.
+    if [ -z "$DISPLAY" ] || [ -z "$XAUTHORITY" ] ||
+        ! sudo -u "$TARGET_USER" test -r "$XAUTHORITY"; then
+        echo "Skipping launch: current X11 display credentials are unavailable."
+        return 1
+    fi
+    return 0
+}
 
 echo "Monitoring Nitro/PredatorSense button (code $NITRO_KEY) on $DEVICE for user $TARGET_USER..."
-echo "Using DISPLAY=$DISPLAY WAYLAND_DISPLAY=$WAYLAND_DISPLAY XAUTHORITY=$XAUTHORITY"
 
 evtest "$DEVICE" | grep --line-buffered "code $NITRO_KEY.*value 1" | while read -r _line; do
-    if ! pgrep -f "/opt/damx/gui/DivAcerManagerMax" > /dev/null; then
+    if ! pgrep -u "$USER_ID" -f "/opt/damx/gui/DivAcerManagerMax" > /dev/null; then
+        if ! load_session_environment; then
+            continue
+        fi
         sudo -u "$TARGET_USER" \
             DISPLAY="$DISPLAY" \
             WAYLAND_DISPLAY="$WAYLAND_DISPLAY" \
             XAUTHORITY="$XAUTHORITY" \
             XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" \
             DBUS_SESSION_BUS_ADDRESS="$DBUS_SESSION_BUS_ADDRESS" \
-            DAMX &
+            /opt/damx/gui/DivAcerManagerMax &
     else
         echo "Interface is already running!"
     fi
