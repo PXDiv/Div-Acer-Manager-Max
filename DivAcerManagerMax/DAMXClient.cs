@@ -438,7 +438,7 @@ public class DAMXClient : IDisposable
     /// <returns>True if successful</returns>
     public async Task<bool> SetPerZoneModeAsync(string zone1, string zone2, string zone3, string zone4, int brightness)
     {
-        if (!IsFeatureAvailable("per_zone_mode"))
+        if (!IsFeatureAvailable("per_zone_mode") && !IsFeatureAvailable("enek5130_hid_rgb"))
         {
             Console.WriteLine("Per-zone keyboard mode is not available on this device");
             return false;
@@ -471,7 +471,7 @@ public class DAMXClient : IDisposable
     public async Task<bool> SetFourZoneModeAsync(int mode, int speed, int brightness, int direction, int red, int green,
         int blue)
     {
-        if (!IsFeatureAvailable("four_zone_mode"))
+        if (!IsFeatureAvailable("four_zone_mode") && !IsFeatureAvailable("enek5130_hid_rgb"))
         {
             Console.WriteLine("Four-zone keyboard mode is not available on this device");
             return false;
