@@ -492,6 +492,32 @@ public class DAMXClient : IDisposable
         return response.RootElement.GetProperty("success").GetBoolean();
     }
 
+    /// <summary>
+    ///     Set rear logo / back-lid lightbar color.
+    /// </summary>
+    /// <param name="color">RGB hex value in RRGGBB format.</param>
+    /// <param name="brightness">Brightness 0-100.</param>
+    /// <param name="enabled">Enable or disable logo/lightbar power.</param>
+    /// <returns>True if successful</returns>
+    public async Task<bool> SetBackLogoColorAsync(string color, int brightness, bool enabled)
+    {
+        if (!IsFeatureAvailable("back_logo"))
+        {
+            Console.WriteLine("Back logo/lightbar control is not available on this device");
+            return false;
+        }
+
+        var parameters = new Dictionary<string, object>
+        {
+            { "color", color },
+            { "brightness", brightness },
+            { "enabled", enabled }
+        };
+
+        var response = await SendCommandAsync("set_back_logo_color", parameters);
+        return response.RootElement.GetProperty("success").GetBoolean();
+    }
+
     protected virtual void Dispose(bool disposing)
     {
         if (_disposed) return;
@@ -567,6 +593,8 @@ public class DAMXSettings
     [JsonPropertyName("per_zone_mode")] public string PerZoneMode { get; set; } = "";
 
     [JsonPropertyName("four_zone_mode")] public string FourZoneMode { get; set; } = "";
+
+    [JsonPropertyName("back_logo_color")] public string BackLogoColor { get; set; } = "";
 
     [JsonPropertyName("modprobe_parameter")]
     public string ModprobeParameter { get; set; } = "";
