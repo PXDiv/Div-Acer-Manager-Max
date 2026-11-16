@@ -103,7 +103,8 @@ the kernel maps to keycode `425` on most models. Some models carry a udev
 hwdb quirk that remaps it to `prog1` (`148`) instead, which is why setup
 captures the code from an actual press rather than assuming one.
 
-Confirmed so far: Nitro ANV16S-41, Predator PHN16S-71 (both `425`).
+Confirmed so far: Nitro ANV16S-41, Predator PHN16S-71, Predator PHN16-72
+(all `425`).
 
 **Note for keyd/kmonad users:** key remappers grab the keyboard exclusively,
 so the detection service never sees the button. Bind the key in the
