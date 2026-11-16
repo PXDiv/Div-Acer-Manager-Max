@@ -5,6 +5,7 @@ import os
 import logging
 import subprocess
 from threading import Timer
+from typing import Optional
 
 # Get logger from main daemon
 log = logging.getLogger("DAMXDaemon")
@@ -42,7 +43,7 @@ class PowerSourceDetector:
         is_plugged_in = self._is_ac_connected()
 
         # Only take action if power state changed
-        if is_plugged_in != self.current_source:
+        if is_plugged_in is not None and is_plugged_in != self.current_source:
             self.current_source = is_plugged_in
             self._handle_power_change(is_plugged_in)
 
@@ -51,24 +52,51 @@ class PowerSourceDetector:
         self.timer.daemon = True
         self.timer.start()
 
-    def _is_ac_connected(self) -> bool:
+    def _is_ac_connected(self) -> Optional[bool]:
         """Check if AC power is connected"""
+        online_statuses = []
+
         try:
-            # Try each possible path for power supply status
+            # Discover AC adapters by their sysfs type rather than their name.
+            for entry in os.scandir("/sys/class/power_supply"):
+                try:
+                    supply_type = self._read_status(os.path.join(entry.path, "type"))
+                    if supply_type != "Mains":
+                        continue
+
+                    status = self._read_status(os.path.join(entry.path, "online"))
+                    if status in ("0", "1"):
+                        online_statuses.append(status == "1")
+                except OSError as e:
+                    log.warning(f"Could not read power supply status at {entry.path}: {e}")
+        except OSError as e:
+            log.debug(f"Could not scan power supplies: {e}")
+
+        if online_statuses:
+            return any(online_statuses)
+
+        try:
+            # Keep compatibility with systems that expose online without type.
             for path in self.possible_power_supply_paths:
                 if os.path.exists(path):
-                    with open(path, 'r') as f:
-                        status = f.read().strip()
+                    status = self._read_status(path)
+                    if status in ("0", "1"):
                         return status == "1"
 
             # If no power supply file is found, try command-line tools
-            return self._check_using_upower() or self._check_using_acpi()
+            upower_status = self._check_using_upower()
+            return upower_status if upower_status is not None else self._check_using_acpi()
 
         except Exception as e:
             log.error(f"Error checking power status: {e}")
-            return False
+            return None
 
-    def _check_using_upower(self) -> bool:
+    @staticmethod
+    def _read_status(path: str) -> str:
+        with open(path, "r") as status_file:
+            return status_file.read().strip()
+
+    def _check_using_upower(self) -> Optional[bool]:
         """Check power status using upower"""
         try:
             result = subprocess.run(
@@ -77,12 +105,17 @@ class PowerSourceDetector:
                 text=True,
                 check=True
             )
-            return "online: yes" in result.stdout
+            output = result.stdout.lower()
+            if "online: yes" in output:
+                return True
+            if "online: no" in output:
+                return False
+            return None
         except (subprocess.CalledProcessError, FileNotFoundError) as e:
-            log.error(f"upower check failed: {e}")
-            return False
+            log.warning(f"upower check failed: {e}")
+            return None
 
-    def _check_using_acpi(self) -> bool:
+    def _check_using_acpi(self) -> Optional[bool]:
         """Check power status using acpi"""
         try:
             result = subprocess.run(
@@ -91,10 +124,15 @@ class PowerSourceDetector:
                 text=True,
                 check=True
             )
-            return "on-line" in result.stdout
+            output = result.stdout.lower()
+            if "on-line" in output:
+                return True
+            if "off-line" in output:
+                return False
+            return None
         except (subprocess.CalledProcessError, FileNotFoundError) as e:
-            log.error(f"acpi check failed: {e}")
-            return False
+            log.warning(f"acpi check failed: {e}")
+            return None
 
     def _handle_power_change(self, is_plugged_in: bool):
         """Handle power source changes"""
