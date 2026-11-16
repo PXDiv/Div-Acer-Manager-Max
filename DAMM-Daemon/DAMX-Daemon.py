@@ -869,7 +869,7 @@ class DAMXManager:
             zone1-zone4: RGB hex values (e.g., "4287f5")
             brightness: 0-100
         """
-        if "per_zone_mode" not in self.available_features:
+        if not ({"per_zone_mode", "enek5130_hid_rgb"} & self.available_features):
             return False
 
         # Validate hex values
@@ -918,7 +918,7 @@ class DAMXManager:
             direction: 1-2 (1=right to left, 2=left to right)
             red, green, blue: 0-255 (RGB color values)
         """
-        if "four_zone_mode" not in self.available_features:
+        if not ({"four_zone_mode", "enek5130_hid_rgb"} & self.available_features):
             return False
 
         # Validate values
@@ -1303,7 +1303,7 @@ class DaemonServer:
 
             elif command == "set_per_zone_mode":
                 # Check if feature is available
-                if "per_zone_mode" not in self.manager.available_features:
+                if not ({"per_zone_mode", "enek5130_hid_rgb"} & self.manager.available_features):
                     return {
                         "success": False,
                         "error": "Per-zone keyboard mode is not supported on this device"
@@ -1329,7 +1329,7 @@ class DaemonServer:
 
             elif command == "set_four_zone_mode":
                 # Check if feature is available
-                if "four_zone_mode" not in self.manager.available_features:
+                if not ({"four_zone_mode", "enek5130_hid_rgb"} & self.manager.available_features):
                     return {
                         "success": False,
                         "error": "Four-zone keyboard mode is not supported on this device"
