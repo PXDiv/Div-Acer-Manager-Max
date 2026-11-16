@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Runtime.CompilerServices;
@@ -68,6 +69,8 @@ public partial class Dashboard : UserControl, INotifyPropertyChanged
     private string _osVersion;
     private string _ramTotal;
     private double _ramUsage;
+    private double _systemTemp;
+    private ObservableCollection<double> _systemTempHistory;
     private CartesianChart _temperatureChart;
     private ObservableCollection<ISeries> _tempSeries;
 
@@ -154,6 +157,12 @@ public partial class Dashboard : UserControl, INotifyPropertyChanged
         set => SetProperty(ref _gpuTemp, value);
     }
 
+    public double SystemTemp
+    {
+        get => _systemTemp;
+        set => SetProperty(ref _systemTemp, value);
+    }
+
     public double CpuUsage
     {
         get => _cpuUsage;
@@ -229,6 +238,9 @@ public partial class Dashboard : UserControl, INotifyPropertyChanged
                 data.GpuTemp = gpuMetrics.temperature;
                 data.GpuUsage = gpuMetrics.usage;
 
+                // Update system (EC/board) temperature
+                data.SystemTemp = GetSystemTemperature();
+
                 // Update battery metrics
                 var batteryInfo = GetBatteryInfo();
                 data.BatteryPercentage = batteryInfo.percentage;
@@ -246,6 +258,7 @@ public partial class Dashboard : UserControl, INotifyPropertyChanged
                 RamUsage = metricsData.RamUsage;
                 GpuTemp = metricsData.GpuTemp;
                 GpuUsage = metricsData.GpuUsage;
+                SystemTemp = metricsData.SystemTemp;
                 BatteryPercentageInt = metricsData.BatteryPercentage;
                 BatteryStatus = metricsData.BatteryStatus;
                 BatteryTimeRemaining.Text = metricsData.BatteryTimeRemaining;
@@ -263,6 +276,10 @@ public partial class Dashboard : UserControl, INotifyPropertyChanged
                 if (_gpuTempHistory.Count >= MAX_HISTORY_POINTS)
                     _gpuTempHistory.RemoveAt(0);
                 _gpuTempHistory.Add(metricsData.GpuTemp);
+
+                if (_systemTempHistory.Count >= MAX_HISTORY_POINTS)
+                    _systemTempHistory.RemoveAt(0);
+                _systemTempHistory.Add(metricsData.SystemTemp);
             });
         }
         catch (Exception ex)
@@ -613,6 +630,7 @@ public partial class Dashboard : UserControl, INotifyPropertyChanged
         // Initialize collections
         _cpuTempHistory = new ObservableCollection<double>();
         _gpuTempHistory = new ObservableCollection<double>();
+        _systemTempHistory = new ObservableCollection<double>();
 
         // Initialize series
         _tempSeries = new ObservableCollection<ISeries>
@@ -638,6 +656,17 @@ public partial class Dashboard : UserControl, INotifyPropertyChanged
                 Fill = new SolidColorPaint(SKColors.Transparent),
                 GeometrySize = 5,
                 XToolTipLabelFormatter = chartPoint => $"GPU: {chartPoint.Label}°C"
+            },
+            new LineSeries<double>
+            {
+                Values = _systemTempHistory,
+                Name = "System Temperature",
+                Stroke = new SolidColorPaint(SKColors.Orange) { StrokeThickness = 3 },
+                GeometryFill = new SolidColorPaint(SKColors.DarkOrange),
+                GeometryStroke = new SolidColorPaint(SKColors.DarkOrange),
+                Fill = new SolidColorPaint(SKColors.Transparent),
+                GeometrySize = 5,
+                XToolTipLabelFormatter = chartPoint => $"System: {chartPoint.Label}°C"
             }
         };
 
@@ -715,50 +744,30 @@ public partial class Dashboard : UserControl, INotifyPropertyChanged
     {
         try
         {
-            // Check for multiple temperature files from hwmon6
-            if (_systemInfoPaths.ContainsKey("cpu_temp_files"))
+            if (_systemInfoPaths.TryGetValue("cpu_temp", out var cpuTempPath) &&
+                TryReadMillidegreeTemperature(cpuTempPath, out var tempC))
+                return Math.Round(tempC, 1);
+
+            cpuTempPath = FindCpuTemperaturePath();
+            if (cpuTempPath != null)
             {
-                var tempFiles = _systemInfoPaths["cpu_temp_files"].Split(',');
-                if (tempFiles.Length > 0)
-                {
-                    double tempSum = 0;
-                    var validReadings = 0;
-
-                    foreach (var tempFile in tempFiles)
-                        if (File.Exists(tempFile))
-                        {
-                            var temperatureStr = File.ReadAllText(tempFile).Trim();
-                            if (int.TryParse(temperatureStr, out var tempValue))
-                            {
-                                // Temperature is often reported in millidegrees C
-                                tempSum += tempValue / 1000.0;
-                                validReadings++;
-                            }
-                        }
-
-                    if (validReadings > 0)
-                        // Calculate average temperature
-                        return Math.Round(tempSum / validReadings, 1);
-                }
-            }
-
-            // Fallback to single temperature file if available
-            if (_systemInfoPaths.ContainsKey("cpu_temp") && File.Exists(_systemInfoPaths["cpu_temp"]))
-            {
-                var temperatureStr = File.ReadAllText(_systemInfoPaths["cpu_temp"]).Trim();
-                if (int.TryParse(temperatureStr, out var tempValue))
-                {
-                    // Temperature is often reported in millidegrees C
-                    var tempC = tempValue / 1000.0;
+                _systemInfoPaths["cpu_temp"] = cpuTempPath;
+                if (TryReadMillidegreeTemperature(cpuTempPath, out tempC))
                     return Math.Round(tempC, 1);
-                }
             }
 
             // Fallback to lm-sensors if available
             var output = RunCommand("sensors", "");
-            var match = Regex.Match(output, @"Package id \d+:\s+\+?(\d+\.\d+)°C");
+            var match = Regex.Match(output, @"Package id \d+:\s+\+?(\d+(?:\.\d+)?)°C");
             if (match.Success)
-                if (double.TryParse(match.Groups[1].Value, out var tempC))
+                if (double.TryParse(match.Groups[1].Value, NumberStyles.Float, CultureInfo.InvariantCulture,
+                        out tempC))
+                    return Math.Round(tempC, 1);
+
+            match = Regex.Match(output, @"(?:Tctl|Tdie):\s+\+?(\d+(?:\.\d+)?)°C");
+            if (match.Success)
+                if (double.TryParse(match.Groups[1].Value, NumberStyles.Float, CultureInfo.InvariantCulture,
+                        out tempC))
                     return Math.Round(tempC, 1);
 
             // Couldn't get temperature
@@ -769,6 +778,105 @@ public partial class Dashboard : UserControl, INotifyPropertyChanged
             Console.WriteLine($"Error getting CPU temperature: {ex.Message}");
             return 0;
         }
+    }
+
+    private double GetSystemTemperature()
+    {
+        try
+        {
+            if (_systemInfoPaths.TryGetValue("system_temp", out var systemTempPath) &&
+                TryReadMillidegreeTemperature(systemTempPath, out var tempC))
+                return Math.Round(tempC, 1);
+
+            // Fallback to lm-sensors acpitz reading if no sysfs path was found
+            var output = RunCommand("sensors", "");
+            var match = Regex.Match(output, @"acpitz-.*?temp1:\s+\+?(\d+(?:\.\d+)?)°C", RegexOptions.Singleline);
+            if (match.Success)
+                if (double.TryParse(match.Groups[1].Value, NumberStyles.Float, CultureInfo.InvariantCulture,
+                        out var sensorsTemp))
+                    return Math.Round(sensorsTemp, 1);
+
+            // Couldn't get temperature
+            return 0;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error getting system temperature: {ex.Message}");
+            return 0;
+        }
+    }
+
+    private static bool TryReadMillidegreeTemperature(string path, out double temperatureC)
+    {
+        temperatureC = 0;
+
+        if (!File.Exists(path))
+            return false;
+
+        var temperatureStr = File.ReadAllText(path).Trim();
+        if (!int.TryParse(temperatureStr, out var tempValue))
+            return false;
+
+        temperatureC = tempValue / 1000.0;
+        return true;
+    }
+
+    private static string? FindCpuTemperaturePath()
+    {
+        var intelPackagePath = FindHwmonTemperaturePath(
+            "coretemp",
+            label => Regex.IsMatch(label, @"^Package id \d+$", RegexOptions.IgnoreCase));
+        if (intelPackagePath != null)
+            return intelPackagePath;
+
+        var amdPackagePath = FindHwmonTemperaturePath(
+            "k10temp",
+            label => string.Equals(label, "Tctl", StringComparison.OrdinalIgnoreCase) ||
+                     string.Equals(label, "Tdie", StringComparison.OrdinalIgnoreCase));
+        if (amdPackagePath != null)
+            return amdPackagePath;
+
+        return FindHwmonTemperaturePath(
+            "zenpower",
+            label => string.Equals(label, "Tctl", StringComparison.OrdinalIgnoreCase) ||
+                     string.Equals(label, "Tdie", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static string? FindHwmonTemperaturePath(string hwmonName, Func<string, bool> labelMatches)
+    {
+        const string hwmonRoot = "/sys/class/hwmon";
+        if (!Directory.Exists(hwmonRoot))
+            return null;
+
+        foreach (var hwmonDir in Directory.GetDirectories(hwmonRoot).OrderBy(path => path))
+        {
+            var nameFile = Path.Combine(hwmonDir, "name");
+            if (!File.Exists(nameFile))
+                continue;
+
+            var name = File.ReadAllText(nameFile).Trim();
+            if (!string.Equals(name, hwmonName, StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            foreach (var labelFile in Directory.GetFiles(hwmonDir, "temp*_label").OrderBy(path => path))
+            {
+                var label = File.ReadAllText(labelFile).Trim();
+                if (!labelMatches(label))
+                    continue;
+
+                var inputFile = Path.Combine(
+                    hwmonDir,
+                    Path.GetFileName(labelFile).Replace("_label", "_input", StringComparison.Ordinal));
+                if (File.Exists(inputFile))
+                    return inputFile;
+            }
+
+            var temp1Input = Path.Combine(hwmonDir, "temp1_input");
+            if (File.Exists(temp1Input))
+                return temp1Input;
+        }
+
+        return null;
     }
 
     private double GetRamUsage()
@@ -930,49 +1038,20 @@ public partial class Dashboard : UserControl, INotifyPropertyChanged
     {
         try
         {
-            // First check for hwmon6 directory and collect all temp input files
-            string[] hwmonPaths =
-            [
-                "/sys/class/hwmon/hwmon5", "/sys/class/hwmon/hwmon6", "/sys/class/hwmon/hwmon7",
-                "/sys/class/hwmon/hwmon8"
-            ];
-            foreach (var hwmonPath in hwmonPaths)
-                if (Directory.Exists(hwmonPath))
-                {
-                    var tempFiles = Directory.GetFiles(hwmonPath, "temp*_input");
-                    if (tempFiles.Length > 3)
-                    {
-                        // Store all temperature files in a list
-                        _systemInfoPaths["cpu_temp_files"] = string.Join(",", tempFiles);
-                        Console.WriteLine(
-                            $"Found CPU Reporting Temps at {_systemInfoPaths["cpu_temp_files"].Split(',').Length} Cores, using their Avg ({hwmonPath})");
-                        return;
-                    }
-                }
+            // Locate the system (EC/board) temperature sensor up front so it is
+            // discovered regardless of which CPU sensor is found below.
+            FindSystemTempPath();
 
-            // Fallback to other possible paths if hwmon6 doesn't have temperature files
-            string[] possibleCpuTempPaths =
+            var cpuTempPath = FindCpuTemperaturePath();
+            if (cpuTempPath != null)
             {
-                "/sys/class/hwmon/hwmon1/temp1_input",
-                "/sys/class/thermal/thermal_zone0/temp",
-                "/sys/devices/platform/coretemp.0/hwmon/hwmon1/temp1_input"
-            };
-
-
-            foreach (var pathPattern in possibleCpuTempPaths)
-                if (Directory.Exists(Path.GetDirectoryName(pathPattern) ?? string.Empty))
-                {
-                    var files = Directory.GetFiles(Path.GetDirectoryName(pathPattern) ?? string.Empty,
-                        Path.GetFileName(pathPattern));
-                    if (files.Length > 0)
-                    {
-                        _systemInfoPaths["cpu_temp"] = files[0];
-                        break;
-                    }
-                }
-
-            Console.WriteLine(
-                $"Found CPU Reporting Temp at {_systemInfoPaths["cpu_temp"].Split(',').Length} Core");
+                _systemInfoPaths["cpu_temp"] = cpuTempPath;
+                Console.WriteLine($"Found CPU package temperature at {cpuTempPath}");
+            }
+            else
+            {
+                Console.WriteLine("CPU package temperature hwmon sensor not found; sensors fallback will be used");
+            }
 
             // Find fan speed paths
             FindFanSpeedPaths();
@@ -1035,6 +1114,63 @@ public partial class Dashboard : UserControl, INotifyPropertyChanged
         catch (Exception ex)
         {
             Console.WriteLine($"Error finding system paths: {ex.Message}");
+        }
+    }
+
+    private void FindSystemTempPath()
+    {
+        try
+        {
+            // Preferred: the Acer EC sensor exposed by linuwu_sense.
+            // The 'acer' hwmon device maps temp1 -> CPU, temp2 -> GPU and
+            // temp3 -> external/board temperature (ACER_WMID_SENSOR_EXTERNAL_TEMPERATURE_2)
+            const string hwmonRoot = "/sys/class/hwmon";
+            var hwmonDirs = Directory.Exists(hwmonRoot)
+                ? Directory.GetDirectories(hwmonRoot)
+                : Array.Empty<string>();
+
+            foreach (var hwmonDir in hwmonDirs)
+            {
+                var nameFile = Path.Combine(hwmonDir, "name");
+                if (!File.Exists(nameFile)) continue;
+
+                var deviceName = File.ReadAllText(nameFile).Trim().ToLower();
+                if (!deviceName.Contains("acer")) continue;
+
+                var systemTempFile = Path.Combine(hwmonDir, "temp3_input");
+                if (File.Exists(systemTempFile))
+                {
+                    _systemInfoPaths["system_temp"] = systemTempFile;
+                    Console.WriteLine($"Found System Temperature at {systemTempFile}");
+                    return;
+                }
+            }
+
+            // Fallback: ACPI thermal zone that is not CPU/GPU specific
+            if (Directory.Exists("/sys/class/thermal"))
+                foreach (var zoneDir in Directory.GetDirectories("/sys/class/thermal", "thermal_zone*"))
+                {
+                    var typeFile = Path.Combine(zoneDir, "type");
+                    if (!File.Exists(typeFile)) continue;
+
+                    var zoneType = File.ReadAllText(typeFile).Trim().ToLower();
+                    if (zoneType.Contains("cpu") || zoneType.Contains("gpu") || zoneType.Contains("pkg"))
+                        continue;
+
+                    var tempFile = Path.Combine(zoneDir, "temp");
+                    if (File.Exists(tempFile))
+                    {
+                        _systemInfoPaths["system_temp"] = tempFile;
+                        Console.WriteLine($"Found System Temperature at {tempFile} ({zoneType})");
+                        return;
+                    }
+                }
+
+            Console.WriteLine("No dedicated system temperature sensor found");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error finding system temperature path: {ex.Message}");
         }
     }
 
@@ -1539,6 +1675,7 @@ public partial class Dashboard : UserControl, INotifyPropertyChanged
         public double RamUsage { get; set; }
         public double GpuTemp { get; set; }
         public double GpuUsage { get; set; }
+        public double SystemTemp { get; set; }
         public int BatteryPercentage { get; set; }
         public string BatteryStatus { get; set; } = "Unknown";
         public string BatteryTimeRemaining { get; set; } = "0";

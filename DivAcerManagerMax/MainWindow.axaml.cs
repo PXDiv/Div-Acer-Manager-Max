@@ -299,16 +299,21 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         var hasKeyboardFeatures = _client.IsFeatureAvailable("backlight_timeout") ||
                                   _client.IsFeatureAvailable("per_zone_mode") ||
                                   _client.IsFeatureAvailable("four_zone_mode") ||
+                                  _client.IsFeatureAvailable("enek5130_hid_rgb") ||
                                   _client.IsFeatureAvailable("back_logo");
 
         if (keyboardLightingTab != null)
             keyboardLightingTab.IsVisible = hasKeyboardFeatures;
 
         if (zoneColorControlPanel != null)
-            zoneColorControlPanel.IsVisible = _client.IsFeatureAvailable("per_zone_mode") || AppState.DevMode;
+            zoneColorControlPanel.IsVisible = _client.IsFeatureAvailable("per_zone_mode") ||
+                                              _client.IsFeatureAvailable("enek5130_hid_rgb") ||
+                                              AppState.DevMode;
 
         if (keyboardEffectsPanel != null)
-            keyboardEffectsPanel.IsVisible = _client.IsFeatureAvailable("four_zone_mode") || AppState.DevMode;
+            keyboardEffectsPanel.IsVisible = _client.IsFeatureAvailable("four_zone_mode") ||
+                                             _client.IsFeatureAvailable("enek5130_hid_rgb") ||
+                                             AppState.DevMode;
 
         var backLogoControls = nameScope.Find<Border>("BackLogoControls");
         if (backLogoControls != null)
@@ -607,7 +612,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private void ApplyKeyboardSettings()
     {
-        if (!_settings.HasFourZoneKb)
+        if (!HasKeyboardRgbControl())
             return;
 
         ApplySavedZonePresetToUI();
@@ -617,6 +622,11 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
         ApplyFourZoneSettingsToUI();
         ApplySavedLightingEffectPresetToUI();
+    }
+
+    private bool HasKeyboardRgbControl()
+    {
+        return _settings.HasFourZoneKb || _client.IsFeatureAvailable("enek5130_hid_rgb");
     }
 
     private void ApplyPerZoneSettingsToUI()
@@ -659,8 +669,16 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
         SetDirectionRadioButtons(direction);
 
-        // Mode 2 / Neon often reports 0,0,0. Do not overwrite the color picker with black for that.
-        if (mode != 2 || red != 0 || green != 0 || blue != 0)
+        // Static colors live in the zone registers, not the global effect RGB.
+        if (mode == 0)
+        {
+            if (TryParsePerZoneMode(_settings.PerZoneMode,
+                    out var zone1, out var zone2, out var zone3, out var zone4, out _) &&
+                zone1 == zone2 && zone1 == zone3 && zone1 == zone4)
+                SetColorPicker(_lightEffectColorPicker, zone1);
+        }
+        // Neon often reports 0,0,0; preserve the user's selected color.
+        else if (mode != 2 || red != 0 || green != 0 || blue != 0)
             SetColorPicker(_lightEffectColorPicker, $"{red:X2}{green:X2}{blue:X2}");
     }
 
@@ -913,7 +931,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private async void ApplyKeyboardColorsButton_Click(object sender, RoutedEventArgs e)
     {
-        if (_isConnected && _settings.HasFourZoneKb)
+        if (_isConnected && HasKeyboardRgbControl())
         {
             await _client.SetPerZoneModeAsync(
                 ToRgbHex(_zone1ColorPicker?.Color ?? Color.Parse(DefaultZone1Color)),
@@ -986,7 +1004,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private async void LightingEffectsApplyButton_Click(object sender, RoutedEventArgs e)
     {
-        if ((_isConnected && _settings.HasFourZoneKb) || AppState.DevMode)
+        if ((_isConnected && HasKeyboardRgbControl()) || AppState.DevMode)
         {
             var mode = _lightingModeComboBox?.SelectedIndex ?? 0;
 
@@ -998,13 +1016,19 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             {
                 var rgb = ToRgbHex(color);
 
-                await _client.SetPerZoneModeAsync(
+                var success = await _client.SetPerZoneModeAsync(
                     rgb,
                     rgb,
                     rgb,
                     rgb,
                     _keyboardBrightness
                 );
+
+                if (!success)
+                {
+                    await ShowMessageBox("Keyboard Lighting Error", "Failed to apply static keyboard lighting.");
+                    return;
+                }
 
                 SaveLightingEffectPresetFromUI(mode, direction, color);
 
