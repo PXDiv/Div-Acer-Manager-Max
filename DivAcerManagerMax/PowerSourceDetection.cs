@@ -43,34 +43,85 @@ public class PowerSourceDetection
     private void UpdatePowerSourceStatus()
     {
         var isPluggedIn = IsLaptopPluggedIn();
+        if (!isPluggedIn.HasValue) return;
 
         // Update UI on UI thread
-        Dispatcher.UIThread.InvokeAsync(() => { _powerToggleSwitch.IsChecked = isPluggedIn; });
+        Dispatcher.UIThread.InvokeAsync(() => { _powerToggleSwitch.IsChecked = isPluggedIn.Value; });
     }
 
-    private bool IsLaptopPluggedIn()
+    private bool? IsLaptopPluggedIn()
     {
+        var onlineStatuses = new List<bool>();
+
         try
         {
-            // Try each possible path for power supply status
+            // Discover AC adapters by their sysfs type rather than their name.
+            try
+            {
+                if (Directory.Exists("/sys/class/power_supply"))
+                    foreach (var powerSupplyPath in Directory.EnumerateDirectories("/sys/class/power_supply"))
+                    {
+                        try
+                        {
+                            if (File.ReadAllText(Path.Combine(powerSupplyPath, "type")).Trim() != "Mains") continue;
+
+                            var status = File.ReadAllText(Path.Combine(powerSupplyPath, "online")).Trim();
+                            if (status == "1")
+                                onlineStatuses.Add(true);
+                            else if (status == "0")
+                                onlineStatuses.Add(false);
+                        }
+                        catch (IOException ex)
+                        {
+                            Console.WriteLine($"Could not read power supply status at {powerSupplyPath}: {ex.Message}");
+                        }
+                        catch (UnauthorizedAccessException ex)
+                        {
+                            Console.WriteLine($"Could not read power supply status at {powerSupplyPath}: {ex.Message}");
+                        }
+                    }
+            }
+            catch (IOException ex)
+            {
+                Console.WriteLine($"Could not scan power supplies: {ex.Message}");
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                Console.WriteLine($"Could not scan power supplies: {ex.Message}");
+            }
+
+            if (onlineStatuses.Count > 0) return onlineStatuses.Contains(true);
+
+            // Keep compatibility with systems that expose online without type.
             foreach (var path in _possiblePowerSupplyPaths)
                 if (File.Exists(path))
                 {
                     var status = File.ReadAllText(path).Trim();
-                    return status == "1";
+                    if (status == "1") return true;
+                    if (status == "0") return false;
                 }
 
-            // If no power supply file is found, try to check using UPower command-line tool
-            return CheckUsingUPower();
+            var upowerStatus = CheckUsingUPower();
+            return upowerStatus ?? CheckUsingLsAcpi();
+        }
+        catch (IOException ex)
+        {
+            Console.WriteLine($"Error checking power status: {ex.Message}");
+            return null;
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            Console.WriteLine($"Error checking power status: {ex.Message}");
+            return null;
         }
         catch (Exception ex)
         {
             Console.WriteLine($"Error checking power status: {ex.Message}");
-            return false;
+            return null;
         }
     }
 
-    private bool CheckUsingUPower()
+    private bool? CheckUsingUPower()
     {
         try
         {
@@ -86,20 +137,19 @@ public class PowerSourceDetection
                 var output = process.StandardOutput.ReadToEnd();
                 process.WaitForExit();
 
-                // Check if the output contains the online status
-                if (output.Contains("online:") && output.Contains("yes")) return true;
+                if (output.Contains("online: yes", StringComparison.OrdinalIgnoreCase)) return true;
+                if (output.Contains("online: no", StringComparison.OrdinalIgnoreCase)) return false;
+                return null;
             }
         }
-        catch
+        catch (Exception ex)
         {
-            // UPower command failed, try alternative method
-            return CheckUsingLsAcpi();
+            Console.WriteLine($"UPower check failed: {ex.Message}");
+            return null;
         }
-
-        return false;
     }
 
-    private bool CheckUsingLsAcpi()
+    private bool? CheckUsingLsAcpi()
     {
         try
         {
@@ -115,14 +165,15 @@ public class PowerSourceDetection
                 var output = process.StandardOutput.ReadToEnd();
                 process.WaitForExit();
 
-                // Check if the output indicates AC adapter is on-line
-                return output.Contains("on-line");
+                if (output.Contains("on-line", StringComparison.OrdinalIgnoreCase)) return true;
+                if (output.Contains("off-line", StringComparison.OrdinalIgnoreCase)) return false;
+                return null;
             }
         }
         catch (Exception ex)
         {
             Console.WriteLine($"Error checking ACPI power status: {ex.Message}");
-            return false;
+            return null;
         }
     }
 }
