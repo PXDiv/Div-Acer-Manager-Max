@@ -537,7 +537,7 @@ class DAMXManager:
         """Write to a VFS file"""
         try:
             with open(path, 'w') as f:
-                f.write(str(value))
+                f.write(f"{str(value).strip()}\n")
             return True
         except Exception as e:
             log.error(f"Failed to write to {path}: {e}")
