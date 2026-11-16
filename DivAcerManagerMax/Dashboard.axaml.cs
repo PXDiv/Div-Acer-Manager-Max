@@ -69,6 +69,8 @@ public partial class Dashboard : UserControl, INotifyPropertyChanged
     private string _osVersion;
     private string _ramTotal;
     private double _ramUsage;
+    private double _systemTemp;
+    private ObservableCollection<double> _systemTempHistory;
     private CartesianChart _temperatureChart;
     private ObservableCollection<ISeries> _tempSeries;
 
@@ -155,6 +157,12 @@ public partial class Dashboard : UserControl, INotifyPropertyChanged
         set => SetProperty(ref _gpuTemp, value);
     }
 
+    public double SystemTemp
+    {
+        get => _systemTemp;
+        set => SetProperty(ref _systemTemp, value);
+    }
+
     public double CpuUsage
     {
         get => _cpuUsage;
@@ -230,6 +238,9 @@ public partial class Dashboard : UserControl, INotifyPropertyChanged
                 data.GpuTemp = gpuMetrics.temperature;
                 data.GpuUsage = gpuMetrics.usage;
 
+                // Update system (EC/board) temperature
+                data.SystemTemp = GetSystemTemperature();
+
                 // Update battery metrics
                 var batteryInfo = GetBatteryInfo();
                 data.BatteryPercentage = batteryInfo.percentage;
@@ -247,6 +258,7 @@ public partial class Dashboard : UserControl, INotifyPropertyChanged
                 RamUsage = metricsData.RamUsage;
                 GpuTemp = metricsData.GpuTemp;
                 GpuUsage = metricsData.GpuUsage;
+                SystemTemp = metricsData.SystemTemp;
                 BatteryPercentageInt = metricsData.BatteryPercentage;
                 BatteryStatus = metricsData.BatteryStatus;
                 BatteryTimeRemaining.Text = metricsData.BatteryTimeRemaining;
@@ -264,6 +276,10 @@ public partial class Dashboard : UserControl, INotifyPropertyChanged
                 if (_gpuTempHistory.Count >= MAX_HISTORY_POINTS)
                     _gpuTempHistory.RemoveAt(0);
                 _gpuTempHistory.Add(metricsData.GpuTemp);
+
+                if (_systemTempHistory.Count >= MAX_HISTORY_POINTS)
+                    _systemTempHistory.RemoveAt(0);
+                _systemTempHistory.Add(metricsData.SystemTemp);
             });
         }
         catch (Exception ex)
@@ -614,6 +630,7 @@ public partial class Dashboard : UserControl, INotifyPropertyChanged
         // Initialize collections
         _cpuTempHistory = new ObservableCollection<double>();
         _gpuTempHistory = new ObservableCollection<double>();
+        _systemTempHistory = new ObservableCollection<double>();
 
         // Initialize series
         _tempSeries = new ObservableCollection<ISeries>
@@ -639,6 +656,17 @@ public partial class Dashboard : UserControl, INotifyPropertyChanged
                 Fill = new SolidColorPaint(SKColors.Transparent),
                 GeometrySize = 5,
                 XToolTipLabelFormatter = chartPoint => $"GPU: {chartPoint.Label}°C"
+            },
+            new LineSeries<double>
+            {
+                Values = _systemTempHistory,
+                Name = "System Temperature",
+                Stroke = new SolidColorPaint(SKColors.Orange) { StrokeThickness = 3 },
+                GeometryFill = new SolidColorPaint(SKColors.DarkOrange),
+                GeometryStroke = new SolidColorPaint(SKColors.DarkOrange),
+                Fill = new SolidColorPaint(SKColors.Transparent),
+                GeometrySize = 5,
+                XToolTipLabelFormatter = chartPoint => $"System: {chartPoint.Label}°C"
             }
         };
 
@@ -748,6 +776,32 @@ public partial class Dashboard : UserControl, INotifyPropertyChanged
         catch (Exception ex)
         {
             Console.WriteLine($"Error getting CPU temperature: {ex.Message}");
+            return 0;
+        }
+    }
+
+    private double GetSystemTemperature()
+    {
+        try
+        {
+            if (_systemInfoPaths.TryGetValue("system_temp", out var systemTempPath) &&
+                TryReadMillidegreeTemperature(systemTempPath, out var tempC))
+                return Math.Round(tempC, 1);
+
+            // Fallback to lm-sensors acpitz reading if no sysfs path was found
+            var output = RunCommand("sensors", "");
+            var match = Regex.Match(output, @"acpitz-.*?temp1:\s+\+?(\d+(?:\.\d+)?)°C", RegexOptions.Singleline);
+            if (match.Success)
+                if (double.TryParse(match.Groups[1].Value, NumberStyles.Float, CultureInfo.InvariantCulture,
+                        out var sensorsTemp))
+                    return Math.Round(sensorsTemp, 1);
+
+            // Couldn't get temperature
+            return 0;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error getting system temperature: {ex.Message}");
             return 0;
         }
     }
@@ -984,6 +1038,10 @@ public partial class Dashboard : UserControl, INotifyPropertyChanged
     {
         try
         {
+            // Locate the system (EC/board) temperature sensor up front so it is
+            // discovered regardless of which CPU sensor is found below.
+            FindSystemTempPath();
+
             var cpuTempPath = FindCpuTemperaturePath();
             if (cpuTempPath != null)
             {
@@ -1056,6 +1114,63 @@ public partial class Dashboard : UserControl, INotifyPropertyChanged
         catch (Exception ex)
         {
             Console.WriteLine($"Error finding system paths: {ex.Message}");
+        }
+    }
+
+    private void FindSystemTempPath()
+    {
+        try
+        {
+            // Preferred: the Acer EC sensor exposed by linuwu_sense.
+            // The 'acer' hwmon device maps temp1 -> CPU, temp2 -> GPU and
+            // temp3 -> external/board temperature (ACER_WMID_SENSOR_EXTERNAL_TEMPERATURE_2)
+            const string hwmonRoot = "/sys/class/hwmon";
+            var hwmonDirs = Directory.Exists(hwmonRoot)
+                ? Directory.GetDirectories(hwmonRoot)
+                : Array.Empty<string>();
+
+            foreach (var hwmonDir in hwmonDirs)
+            {
+                var nameFile = Path.Combine(hwmonDir, "name");
+                if (!File.Exists(nameFile)) continue;
+
+                var deviceName = File.ReadAllText(nameFile).Trim().ToLower();
+                if (!deviceName.Contains("acer")) continue;
+
+                var systemTempFile = Path.Combine(hwmonDir, "temp3_input");
+                if (File.Exists(systemTempFile))
+                {
+                    _systemInfoPaths["system_temp"] = systemTempFile;
+                    Console.WriteLine($"Found System Temperature at {systemTempFile}");
+                    return;
+                }
+            }
+
+            // Fallback: ACPI thermal zone that is not CPU/GPU specific
+            if (Directory.Exists("/sys/class/thermal"))
+                foreach (var zoneDir in Directory.GetDirectories("/sys/class/thermal", "thermal_zone*"))
+                {
+                    var typeFile = Path.Combine(zoneDir, "type");
+                    if (!File.Exists(typeFile)) continue;
+
+                    var zoneType = File.ReadAllText(typeFile).Trim().ToLower();
+                    if (zoneType.Contains("cpu") || zoneType.Contains("gpu") || zoneType.Contains("pkg"))
+                        continue;
+
+                    var tempFile = Path.Combine(zoneDir, "temp");
+                    if (File.Exists(tempFile))
+                    {
+                        _systemInfoPaths["system_temp"] = tempFile;
+                        Console.WriteLine($"Found System Temperature at {tempFile} ({zoneType})");
+                        return;
+                    }
+                }
+
+            Console.WriteLine("No dedicated system temperature sensor found");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error finding system temperature path: {ex.Message}");
         }
     }
 
@@ -1560,6 +1675,7 @@ public partial class Dashboard : UserControl, INotifyPropertyChanged
         public double RamUsage { get; set; }
         public double GpuTemp { get; set; }
         public double GpuUsage { get; set; }
+        public double SystemTemp { get; set; }
         public int BatteryPercentage { get; set; }
         public string BatteryStatus { get; set; } = "Unknown";
         public string BatteryTimeRemaining { get; set; } = "0";
