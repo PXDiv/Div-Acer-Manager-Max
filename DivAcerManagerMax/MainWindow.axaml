@@ -455,7 +455,8 @@
                                         <TextBlock Grid.Row="0" Grid.Column="0" Text="Speed:"
                                                    VerticalAlignment="Center" Width="80" />
                                         <Slider x:Name="LightingSpeedSlider" Grid.Row="0" Grid.Column="1" Value="5"
-                                                Maximum="9" Minimum="0" IsSnapToTickEnabled="True" TickFrequency="1" />
+                                                Maximum="9" Minimum="1" IsSnapToTickEnabled="True" TickFrequency="1"
+                                                IsEnabled="False" />
                                         <TextBlock x:Name="LightSpeedTextBlock" Grid.Row="0" Grid.Column="2" Text="5"
                                                    Width="30" TextAlignment="Right" />
 
