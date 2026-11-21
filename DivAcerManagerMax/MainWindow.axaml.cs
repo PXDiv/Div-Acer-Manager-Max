@@ -251,6 +251,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         if (_applyBackLogoButton != null) _applyBackLogoButton.Click += ApplyBackLogoButton_Click;
 
         // Lighting effects handlers
+        if (_lightingModeComboBox != null) _lightingModeComboBox.SelectionChanged += LightingModeComboBox_SelectionChanged;
         if (_lightingSpeedSlider != null) _lightingSpeedSlider.PropertyChanged += LightingSpeedSlider_ValueChanged;
         if (_lightingEffectsApplyButton != null) _lightingEffectsApplyButton.Click += LightingEffectsApplyButton_Click;
 
@@ -945,6 +946,12 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
     }
 
+    private void LightingModeComboBox_SelectionChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        // Static mode has no speed
+        SetEnabled(_lightingSpeedSlider, _lightingModeComboBox?.SelectedIndex != 0);
+    }
+
     private void LightingSpeedSlider_ValueChanged(object sender, AvaloniaPropertyChangedEventArgs e)
     {
         if (e.Property == Slider.ValueProperty)
@@ -1094,12 +1101,13 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private void SetLightingSpeed(int speed, bool updateSlider = true)
     {
-        _lightingSpeed = speed;
+        // Speed 0 stops or blanks the animated effects, so the slider starts at 1
+        _lightingSpeed = Math.Clamp(speed, 1, 9);
 
         if (updateSlider && _lightingSpeedSlider != null)
-            _lightingSpeedSlider.Value = speed;
+            _lightingSpeedSlider.Value = _lightingSpeed;
 
-        SetText(_lightSpeedTextBlock, speed.ToString());
+        SetText(_lightSpeedTextBlock, _lightingSpeed.ToString());
     }
 
     private void SetBackLogoBrightness(int brightness, bool updateSlider = true)
