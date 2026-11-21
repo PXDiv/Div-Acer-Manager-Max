@@ -75,7 +75,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private Slider _keyBrightnessSlider;
     private TextBlock _keyBrightnessText;
     private TextBlock _laptopTypeText;
-    private CheckBox _lcdOverrideCheckBox;
+    private CheckBox _lcdOverdriveCheckBox;
     private RadioButton _leftToRightRadioButton;
     private ColorPicker _lightEffectColorPicker;
     private Button _lightingEffectsApplyButton;
@@ -190,7 +190,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
         // System settings controls
         _backlightTimeoutCheckBox = nameScope.Find<CheckBox>("BacklightTimeoutCheckBox");
-        _lcdOverrideCheckBox = nameScope.Find<CheckBox>("LcdOverrideCheckBox");
+        _lcdOverdriveCheckBox = nameScope.Find<CheckBox>("LcdOverdriveCheckBox");
         _bootAnimAndSoundCheckBox = nameScope.Find<CheckBox>("BootAnimAndSoundCheckBox");
 
         // Info Texts
@@ -256,7 +256,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
         // System settings handlers
         if (_backlightTimeoutCheckBox != null) _backlightTimeoutCheckBox.Click += BacklightTimeoutCheckBox_Click;
-        if (_lcdOverrideCheckBox != null) _lcdOverrideCheckBox.Click += LcdOverrideCheckBox_Click;
+        if (_lcdOverdriveCheckBox != null) _lcdOverdriveCheckBox.Click += LcdOverdriveCheckBox_Click;
         if (_bootAnimAndSoundCheckBox != null) _bootAnimAndSoundCheckBox.Click += BootSoundCheckBox_Click;
     }
 
@@ -324,18 +324,18 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
         if (systemSettingsTab != null)
         {
-            var hasSystemSettings = _client.IsFeatureAvailable("lcd_override") ||
+            var hasSystemSettings = _client.IsFeatureAvailable("lcd_overdrive") ||
                                     _client.IsFeatureAvailable("boot_animation_sound");
 
             var backlightControls = nameScope.Find<Border>("BacklightTimeoutControls");
-            var lcdControls = nameScope.Find<Border>("LcdOverrideControls");
+            var lcdControls = nameScope.Find<Border>("LcdOverdriveControls");
             var bootSoundControls = nameScope.Find<Border>("BootSoundControls");
 
             if (backlightControls != null)
                 backlightControls.IsVisible = _client.IsFeatureAvailable("backlight_timeout") || AppState.DevMode;
 
             if (lcdControls != null)
-                lcdControls.IsVisible = _client.IsFeatureAvailable("lcd_override") || AppState.DevMode;
+                lcdControls.IsVisible = _client.IsFeatureAvailable("lcd_overdrive") || AppState.DevMode;
 
             if (bootSoundControls != null)
                 bootSoundControls.IsVisible = _client.IsFeatureAvailable("boot_animation_sound") || AppState.DevMode;
@@ -482,7 +482,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         SetText(_calibrationStatusTextBlock, isCalibrating ? "Status: Calibrating" : "Status: Not calibrating");
 
         SetCheckBox(_bootAnimAndSoundCheckBox, IsEnabledSetting(_settings.BootAnimationSound));
-        SetCheckBox(_lcdOverrideCheckBox, IsEnabledSetting(_settings.LcdOverride));
+        SetCheckBox(_lcdOverdriveCheckBox, IsEnabledSetting(_settings.LcdOverdrive));
 
         if (_usbChargingComboBox != null)
             _usbChargingComboBox.SelectedIndex = GetUsbChargingIndex(_settings.UsbCharging);
@@ -1055,10 +1055,10 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             await _client.SetBacklightTimeoutAsync(checkBox.IsChecked ?? false);
     }
 
-    private async void LcdOverrideCheckBox_Click(object sender, RoutedEventArgs e)
+    private async void LcdOverdriveCheckBox_Click(object sender, RoutedEventArgs e)
     {
         if (_isConnected && sender is CheckBox checkBox)
-            await _client.SetLcdOverrideAsync(checkBox.IsChecked ?? false);
+            await _client.SetLcdOverdriveAsync(checkBox.IsChecked ?? false);
     }
 
     private async void BootSoundCheckBox_Click(object sender, RoutedEventArgs e)

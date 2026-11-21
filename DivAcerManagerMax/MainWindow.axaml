@@ -564,14 +564,14 @@
                         <StackPanel Margin="10,0,20,0">
                             <TextBlock Text="System Settings" Classes="SectionHeader" />
 
-                            <!-- LCD Override -->
-                            <Border Classes="Card" x:Name="LcdOverrideControls">
+                            <!-- LCD Overdrive -->
+                            <Border Classes="Card" x:Name="LcdOverdriveControls">
                                 <StackPanel>
-                                    <TextBlock Text="LCD Override" Classes="SubHeader" />
+                                    <TextBlock Text="LCD Overdrive" Classes="SubHeader" />
                                     <TextBlock Text="Reduce LCD latency and minimize ghosting" Opacity="0.7"
                                                Margin="0 0 0 10" />
 
-                                    <CheckBox x:Name="LcdOverrideCheckBox" Content="Enable LCD Override"
+                                    <CheckBox x:Name="LcdOverdriveCheckBox" Content="Enable LCD Overdrive"
                                               IsChecked="True" Margin="0 10" />
                                     <TextBlock Text="Note: May increase battery consumption" Foreground="#FFA500"
                                                FontSize="12" Margin="0 5" />

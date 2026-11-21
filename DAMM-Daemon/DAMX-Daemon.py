@@ -492,7 +492,9 @@ class DAMXManager:
                 ("battery_limiter", "battery_limiter"),
                 ("boot_animation_sound", "boot_animation_sound"),
                 ("fan_speed", "fan_speed"),
-                ("lcd_override", "lcd_override"),
+                ("lcd_overdrive", "lcd_overdrive"),
+                # Drivers before the rename to lcd_overdrive
+                ("lcd_overdrive", "lcd_override"),
                 ("usb_charging", "usb_charging"),
             ]
 
@@ -835,20 +837,28 @@ class DAMXManager:
         )
 
 
-    def get_lcd_override(self) -> str:
-        """Get LCD override status"""
-        if "lcd_override" not in self.available_features:
+    def _get_lcd_overdrive_path(self) -> str:
+        """Return the LCD overdrive file, under its old name on older drivers"""
+        path = os.path.join(self.base_path, "lcd_overdrive")
+        if os.path.exists(path):
+            return path
+
+        return os.path.join(self.base_path, "lcd_override")
+
+    def get_lcd_overdrive(self) -> str:
+        """Get LCD overdrive status"""
+        if "lcd_overdrive" not in self.available_features:
             return ""
 
-        return self._read_file(os.path.join(self.base_path, "lcd_override"))
+        return self._read_file(self._get_lcd_overdrive_path())
 
-    def set_lcd_override(self, enabled: bool) -> bool:
-        """Set LCD override status"""
-        if "lcd_override" not in self.available_features:
+    def set_lcd_overdrive(self, enabled: bool) -> bool:
+        """Set LCD overdrive status"""
+        if "lcd_overdrive" not in self.available_features:
             return False
 
         return self._write_file(
-            os.path.join(self.base_path, "lcd_override"),
+            self._get_lcd_overdrive_path(),
             "1" if enabled else "0"
         )
 
@@ -1071,8 +1081,8 @@ class DAMXManager:
                 "gpu": gpu_fan
             }
 
-        if "lcd_override" in self.available_features:
-            settings["lcd_override"] = self.get_lcd_override()
+        if "lcd_overdrive" in self.available_features:
+            settings["lcd_overdrive"] = self.get_lcd_overdrive()
 
         if "usb_charging" in self.available_features:
             settings["usb_charging"] = self.get_usb_charging()
@@ -1343,20 +1353,20 @@ class DaemonServer:
                     "error": "Failed to set fan speed" if not success else None
                 }
 
-            elif command == "set_lcd_override":
+            elif command == "set_lcd_overdrive":
                 # Check if feature is available
-                if "lcd_override" not in self.manager.available_features:
+                if "lcd_overdrive" not in self.manager.available_features:
                     return {
                         "success": False,
-                        "error": "LCD override is not supported on this device"
+                        "error": "LCD overdrive is not supported on this device"
                     }
 
                 enabled = params.get("enabled", False)
-                success = self.manager.set_lcd_override(enabled)
+                success = self.manager.set_lcd_overdrive(enabled)
                 return {
                     "success": success,
                     "data": {"enabled": enabled} if success else None,
-                    "error": "Failed to set LCD override" if not success else None
+                    "error": "Failed to set LCD overdrive" if not success else None
                 }
 
             elif command == "set_usb_charging":

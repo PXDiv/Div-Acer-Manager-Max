@@ -59,7 +59,7 @@ No worries! Your device might still be supported unofficially.
 2. Start the drivers with one of the following parameters:
 
    * `nitro_v4` or `predator_v4`
-   * Optional: Add `enable_all` to unlock all features (RGB control, LCD override, etc.)
+   * Optional: Add `enable_all` to unlock all features (RGB control, LCD overdrive, etc.)
 3. If this works, you can **make the parameter persistent** using the Internals Manager.
 
 Want native support?
@@ -107,7 +107,7 @@ Here's a user-friendly process to add support for a new Acer laptop model to the
      static struct quirk_entry quirk_acer_YOUR_MODEL = {
         .predator_v4 = 1,             // If uses Predator Sense v4
         .nitro_v4 = 1,                // If uses Nitro Sense v4
-        .nitro_sense = 1,             // If it does'nt support LCD Override and Boot Animation Sound use nitro_sense
+        .nitro_sense = 1,             // If it does'nt support LCD Overdrive and Boot Animation Sound use nitro_sense
         .four_zone_kb = 1             // If has 4-zone RGB keyboard
      
         //special quirks (only add these if you know what you are doing and your hardware supports it)
@@ -172,7 +172,7 @@ This will just enable the base quirk with defaults of nitro_sense
 Here are the default structs:
 - For predator_v4 use `.driver_data =  &quirk_acer_predator_v4` // Enables Base Predator_v4, use in predator models. <br>
 - For nitro_v4 use `.driver_data =  &quirk_acer_nitro_v4` // Enables Base Nitro_v4, use in nitro models. <br>
-- For nitro_sense use `.driver_data = &quirk_acer_nitro` //Used in nitro models without special features like lcd override and boot sound (like ANV15-51). <br>
+- For nitro_sense use `.driver_data = &quirk_acer_nitro` //Used in nitro models without special features like lcd overdrive and boot sound (like ANV15-51). <br>
 
 
 *For an "Acer Predator AN515-58" with all features:*
