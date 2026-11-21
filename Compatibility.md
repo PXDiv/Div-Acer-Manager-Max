@@ -29,7 +29,7 @@ Please also check out the [FAQ Page](https://github.com/PXDiv/Div-Acer-Manager-M
 | PH315-53            | ✅ Supported            | Known stable, uses dedicated quirk.                              |
 | AN515-44            | ✅ Supported <br> (See Notes)  | Need to force parameters <br> using Internals Manager (`nitro_v4`)|
 | AN515-47            | ✅ Supported <br> (See Notes)  | Need to force parameters <br> using Internals Manager (`nitro_v4`)|
-| AN515-58            | ✅ Supported <br> (See Notes)| Has Inbuilt support, <br> To use LCD Override use `nitro_v4` parameter|
+| AN515-58            | ✅ Supported <br> (See Notes)| Has Inbuilt support, <br> To use LCD Overdrive use `nitro_v4` parameter|
 | AN517-54            | ✅ Supported <br> (See Notes)  | Need to force parameters <br> using Internals Manager (`nitro_v4`)|
 | AN517-55            | ⚪ Not Yet Verified     | No reports yet — hardware support unconfirmed.                   |
 | Aspire 1360         | ✅ Supported            | Legacy model — uses Aspire 1520 quirk.                           |

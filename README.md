@@ -29,8 +29,8 @@
   Manual and Auto fan speed modes
   Manual disabled automatically when in Quiet profile
 
-* 💡 **LCD Override Setting**
-  Direct control over LCD power behavior
+* 💡 **LCD Overdrive Setting**
+  Reduce LCD latency and minimize ghosting
 
 * 🎨 **Keyboard Backlight Timeout Control**
   Customize the keyboard backlight timeout

@@ -384,15 +384,15 @@ public class DAMXClient : IDisposable
     }
 
     /// <summary>
-    ///     Set LCD override
+    ///     Set LCD overdrive
     /// </summary>
-    /// <param name="enabled">Enable or disable LCD override</param>
+    /// <param name="enabled">Enable or disable LCD overdrive</param>
     /// <returns>True if successful</returns>
-    public async Task<bool> SetLcdOverrideAsync(bool enabled)
+    public async Task<bool> SetLcdOverdriveAsync(bool enabled)
     {
-        if (!IsFeatureAvailable("lcd_override"))
+        if (!IsFeatureAvailable("lcd_overdrive"))
         {
-            Console.WriteLine("LCD override feature is not available on this device");
+            Console.WriteLine("LCD overdrive feature is not available on this device");
             return false;
         }
 
@@ -401,7 +401,7 @@ public class DAMXClient : IDisposable
             { "enabled", enabled }
         };
 
-        var response = await SendCommandAsync("set_lcd_override", parameters);
+        var response = await SendCommandAsync("set_lcd_overdrive", parameters);
         return response.RootElement.GetProperty("success").GetBoolean();
     }
 
@@ -586,7 +586,7 @@ public class DAMXSettings
 
     [JsonPropertyName("fan_speed")] public FanSpeedSettings FanSpeed { get; set; } = new();
 
-    [JsonPropertyName("lcd_override")] public string LcdOverride { get; set; } = "0";
+    [JsonPropertyName("lcd_overdrive")] public string LcdOverdrive { get; set; } = "0";
 
     [JsonPropertyName("usb_charging")] public string UsbCharging { get; set; } = "0";
 
