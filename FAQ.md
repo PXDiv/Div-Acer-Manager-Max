@@ -37,6 +37,27 @@ There are several common reasons for driver installation issues:
 
 ---
 
+### 🔄 DAMX Stops Working After a System or Kernel Update
+
+Linuwu-Sense is an out-of-tree kernel module, so it has to be built for each
+kernel. Older DAMX versions installed it for the running kernel only. After a
+kernel update the new kernel had no driver, and the GUI lost its controls until
+DAMX was reinstalled.
+
+The installer now registers the driver with **DKMS**, which rebuilds it
+automatically whenever a new kernel is installed. Check it with:
+
+```bash
+dkms status linuwu_sense
+```
+
+Every installed kernel should be listed as `installed`. If DKMS could not be
+installed, or Secure Boot is enabled (the DAMX-signed driver is installed for
+the running kernel only), run `setup.sh` again after kernel updates and choose
+**Reinstall/Update DAMX Suite**.
+
+---
+
 ### 🧩 GUI is Empty or Showing "Unknown Model" (Even Though Your Model Is Supported)
 
 This is usually caused by model detection issues:

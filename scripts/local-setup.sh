@@ -167,6 +167,10 @@ comprehensive_cleanup() {
     cd ..
   fi
 
+  # Also drop the DKMS registration when the driver sources are not next to
+  # this script.
+  remove_dkms_driver
+
   # Remove nitro key configuration
   rm -rf /etc/damx
 
@@ -434,8 +438,50 @@ install_build_deps() {
   fi
 }
 
+# DKMS rebuilds Linuwu-Sense automatically when a new kernel is installed, so
+# DAMX keeps working after system updates without a reinstall. Best effort:
+# without DKMS the driver is installed for the running kernel only.
+install_dkms() {
+  if command -v dkms &> /dev/null; then
+    return 0
+  fi
+
+  echo -e "${YELLOW}Installing DKMS so the driver is rebuilt after kernel updates...${NC}"
+  if command -v pacman &> /dev/null; then
+    pacman -S --needed --noconfirm dkms
+  elif command -v apt-get &> /dev/null; then
+    apt-get update && apt-get install -y dkms
+  elif command -v dnf &> /dev/null; then
+    dnf install -y dkms
+  elif command -v zypper &> /dev/null; then
+    zypper install -y dkms
+  fi
+
+  command -v dkms &> /dev/null
+}
+
+# Remove Linuwu-Sense from DKMS, even when the driver sources are not available.
+remove_dkms_driver() {
+  local entry
+  local version
+
+  command -v dkms &> /dev/null || return 0
+  [ -d /var/lib/dkms/linuwu_sense ] || return 0
+
+  echo "Removing Linuwu-Sense from DKMS..."
+  for entry in /var/lib/dkms/linuwu_sense/*/; do
+    version=$(basename "$entry")
+    case "$version" in
+      original_module|kernel-*) continue ;;
+    esac
+    dkms remove -m linuwu_sense -v "$version" --all || true
+  done
+  rm -rf /usr/src/linuwu_sense-*
+}
+
 install_drivers() {
   local build_args=()
+  local install_args=()
   local signing_status
 
   echo -e "${YELLOW}Installing Linuwu-Sense drivers...${NC}"
@@ -494,7 +540,18 @@ install_drivers() {
     return 1
   fi
 
-  if ! make install "${build_args[@]}"; then
+  # DKMS rebuilds the driver after kernel updates (the original Linuwu-Sense
+  # Makefile requires it). With Secure Boot, Div-Linuwu-Sense keeps the
+  # single-kernel install signed with the DAMX key above.
+  if ! install_dkms; then
+    echo -e "${YELLOW}Warning: DKMS is not available. The driver is installed for kernel $(uname -r) only;${NC}"
+    echo -e "${YELLOW}run this installer again after kernel updates.${NC}"
+  fi
+  if [ "$MODULE_SIGNING_REQUIRED" = true ]; then
+    install_args=(USE_DKMS=0)
+  fi
+
+  if ! make install "${build_args[@]}" "${install_args[@]}"; then
     echo -e "${RED}Error: Failed to install Linuwu-Sense drivers${NC}"
     cd .. || return 1
     pause
