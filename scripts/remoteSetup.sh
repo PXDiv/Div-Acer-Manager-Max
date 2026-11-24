@@ -308,16 +308,18 @@ is_llvm_kernel() {
   kernel_release=$(uname -r)
   kernel_build="/lib/modules/${kernel_release}/build"
 
+  # The kernel config is authoritative: CachyOS also ships GCC-built kernels
+  # (e.g. linux-cachyos-lts), so only guess from the distro when it is missing.
   for config_file in "/boot/config-${kernel_release}" "${kernel_build}/.config"; do
-    if [ -r "$config_file" ] && grep -q '^CONFIG_CC_IS_CLANG=y' "$config_file"; then
-      return 0
+    if [ -r "$config_file" ]; then
+      grep -q '^CONFIG_CC_IS_CLANG=y' "$config_file"
+      return
     fi
   done
 
-  if command -v zgrep &> /dev/null &&
-     [ -r /proc/config.gz ] &&
-     zgrep -q '^CONFIG_CC_IS_CLANG=y' /proc/config.gz; then
-    return 0
+  if command -v zgrep &> /dev/null && [ -r /proc/config.gz ]; then
+    zgrep -q '^CONFIG_CC_IS_CLANG=y' /proc/config.gz
+    return
   fi
 
   if grep -qsiE 'clang|llvm' /proc/version 2>/dev/null; then
