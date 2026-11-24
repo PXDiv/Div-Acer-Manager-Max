@@ -3,7 +3,10 @@
 
 import os
 import logging
+import select
 import subprocess
+import threading
+import time
 from threading import Timer
 from typing import Optional
 
@@ -34,6 +37,7 @@ class PowerSourceDetector:
     def start_monitoring(self):
         """Start periodic power source checking"""
         self.check_power_source()
+        threading.Thread(target=self._watch_platform_profile, daemon=True).start()
         log.info("Monitoring power source started")
 
     def stop_monitoring(self):
@@ -57,27 +61,48 @@ class PowerSourceDetector:
         self.timer.daemon = True
         self.timer.start()
 
+    def _watch_platform_profile(self):
+        """Sync as soon as the kernel reports a profile change (the 5 s check is the fallback)."""
+        try:
+            with open(LEGACY_PROFILE) as f:
+                poller = select.poll()
+                poller.register(f, select.POLLPRI | select.POLLERR)
+                while True:
+                    f.seek(0)
+                    f.read()
+                    poller.poll()
+                    time.sleep(0.3)  # let the EC settle; also bounds CPU if notifications storm
+                    self._sync_platform_profiles()
+        except OSError as e:
+            log.debug(f"Platform profile watch stopped: {e}")
+
     def _sync_platform_profiles(self):
-        """Re-apply the acer-wmi profile to every handler when they disagree.
+        """Copy the acer-wmi profile to the other handlers when they disagree.
 
         The mode key changes the acer-wmi profile in the EC directly, so other
         handlers (e.g. amd-pmf) keep the old one, the shared profile reads
-        "custom" and power-profiles-daemon stops following it.
+        "custom" and power-profiles-daemon stops following it. Only the
+        lagging handlers are written: re-applying acer-wmi replays the
+        keyboard's mode animation.
         """
         try:
             with open(LEGACY_PROFILE) as f:
                 if f.read().strip() != "custom":
                     return
+            handlers = {}
             for entry in os.scandir(PROFILE_CLASS):
                 with open(os.path.join(entry.path, "name")) as f:
-                    if f.read().strip() != "acer-wmi":
-                        continue
+                    name = f.read().strip()
                 with open(os.path.join(entry.path, "profile")) as f:
-                    profile = f.read().strip()
-                with open(LEGACY_PROFILE, "w") as f:
-                    f.write(profile)
-                log.info(f"Synced platform profile handlers to {profile}")
+                    handlers[entry.path] = (name, f.read().strip())
+            acer = [prof for name, prof in handlers.values() if name == "acer-wmi"]
+            if not acer:
                 return
+            for path, (name, prof) in handlers.items():
+                if name != "acer-wmi" and prof != acer[0]:
+                    with open(os.path.join(path, "profile"), "w") as f:
+                        f.write(acer[0])
+                    log.info(f"Synced {name} platform profile to {acer[0]}")
         except OSError as e:
             log.debug(f"Could not sync platform profiles: {e}")
 
