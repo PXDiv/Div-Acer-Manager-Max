@@ -53,7 +53,7 @@ This is usually caused by model detection issues:
 
 No worries! Your device might still be supported unofficially.
 
-**Steps to try:**
+**Steps to try (GUI):**
 
 1. Open the **Internals Manager** in the GUI.
 2. Start the drivers with one of the following parameters:
@@ -61,6 +61,14 @@ No worries! Your device might still be supported unofficially.
    * `nitro_v4` or `predator_v4`
    * Optional: Add `enable_all` to unlock all features (RGB control, LCD override, etc.)
 3. If this works, you can **make the parameter persistent** using the Internals Manager.
+
+**Same steps via CLI (`damx`):**
+
+```bash
+damx internals force-nitro      # or: force-predator / force-all
+damx internals set-modprobe enable_all   # make it persistent (nitro|predator|enable_all|none)
+damx status                     # check the detected model and features
+```
 
 Want native support?
 

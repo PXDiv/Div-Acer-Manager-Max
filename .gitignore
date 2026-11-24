@@ -1,9 +1,17 @@
 
 DivAcerManagerMax/obj/
 
-DivAcerManagerMax/bin/Release/net9.0/linux-x64/
+DivAcerManagerMax/bin/
 
-DivAcerManagerMax/bin/Debug/net9.0/
+DivAcerManagerMax-CLI/obj/
+
+DivAcerManagerMax-CLI/bin/
+
+DAMXCommon/obj/
+
+DAMXCommon/bin/
+
+*~
 
 Publish/
 
