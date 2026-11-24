@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Acer Fan Curve Telemetry</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{font-family:'Inter',sans-serif;background:#0f0f13;color:#e0e0e0;min-height:100vh}
+  .header{background:linear-gradient(135deg,#1a1a2e 0%,#16213e 50%,#0f3460 100%);
+    padding:24px 32px;border-bottom:1px solid rgba(99,179,237,.15);
+    display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px}
+  .header h1{font-size:1.4rem;font-weight:700;
+    background:linear-gradient(135deg,#63b3ed,#7c3aed);-webkit-background-clip:text;
+    -webkit-text-fill-color:transparent}
+  .header .controls{display:flex;gap:10px;align-items:center}
+  .btn{padding:8px 16px;border:1px solid rgba(99,179,237,.3);border-radius:8px;
+    background:rgba(99,179,237,.08);color:#63b3ed;cursor:pointer;font-size:.8rem;
+    font-family:inherit;transition:all .2s}
+  .btn:hover{background:rgba(99,179,237,.2);border-color:#63b3ed}
+  .btn.active{background:rgba(99,179,237,.25);border-color:#63b3ed;box-shadow:0 0 12px rgba(99,179,237,.15)}
+  input[type=file]{display:none}
+  .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));
+    gap:10px;padding:20px 32px}
+  .stat{background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);
+    border-radius:12px;padding:14px;text-align:center;transition:border-color .3s}
+  .stat .label{font-size:.65rem;text-transform:uppercase;letter-spacing:.05em;color:#888;margin-bottom:4px}
+  .stat .value{font-size:1.4rem;font-weight:700}
+  .stat .value.hot{color:#f56565}.stat .value.warm{color:#ed8936}
+  .stat .value.cool{color:#48bb78}.stat .value.rpm{color:#63b3ed}
+  .stat .value.mode-coupled{color:#f56565}.stat .value.mode-ind{color:#48bb78}
+  .stat .value.pwr-capped{color:#f6ad55}.stat .value.pwr-uncapped{color:#48bb78}
+  .stat .value.epp-active{color:#48bb78}.stat .value.epp-idle{color:#63b3ed;font-size:1.1rem}
+  .stat.capped-glow{border-color:rgba(246,173,85,.4);box-shadow:0 0 12px rgba(246,173,85,.1)}
+  .charts{padding:12px 32px 32px;display:flex;flex-direction:column;gap:16px}
+  .chart-card{background:rgba(255,255,255,.02);border:1px solid rgba(255,255,255,.06);
+    border-radius:12px;padding:20px;position:relative}
+  .chart-card h2{font-size:.85rem;color:#aaa;margin-bottom:4px;font-weight:500}
+  .chart-card .legend-hint{font-size:.65rem;color:#555;margin-bottom:10px}
+  .chart-wrap{height:260px;position:relative}
+  .drop-zone{border:2px dashed rgba(99,179,237,.3);border-radius:16px;padding:60px;
+    text-align:center;margin:20px 32px;color:#666;transition:all .3s;cursor:pointer}
+  .drop-zone:hover,.drop-zone.drag{border-color:#63b3ed;background:rgba(99,179,237,.05);color:#63b3ed}
+  .drop-zone p{font-size:.9rem}
+  .drop-zone .hint{font-size:.75rem;margin-top:8px;color:#555}
+  .hidden{display:none}
+  .live-dot{width:8px;height:8px;border-radius:50%;background:#48bb78;display:inline-block;
+    margin-right:6px;animation:pulse 1.5s infinite}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+  .time-range{display:flex;gap:6px}
+  .session-summary{padding:0 32px 12px;display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px}
+  .summary-card{background:rgba(255,255,255,.02);border:1px solid rgba(255,255,255,.06);
+    border-radius:10px;padding:12px 16px;font-size:.75rem;color:#999}
+  .summary-card .val{font-size:1rem;font-weight:600;color:#e0e0e0;margin-top:2px}
+  .summary-card .val.bad{color:#f56565}.summary-card .val.ok{color:#ed8936}.summary-card .val.good{color:#48bb78}
+</style>
+</head>
+<body>
+<div class="header">
+  <h1>🌡️ Acer Fan Curve Telemetry</h1>
+  <div class="controls">
+    <div class="time-range">
+      <button class="btn active" data-range="300" onclick="setRange(this)">5m</button>
+      <button class="btn" data-range="900" onclick="setRange(this)">15m</button>
+      <button class="btn" data-range="3600" onclick="setRange(this)">1h</button>
+      <button class="btn" data-range="0" onclick="setRange(this)">All</button>
+    </div>
+    <label class="btn" id="loadBtn">📂 Load CSV<input type="file" accept=".csv" onchange="loadFile(event)"></label>
+    <button class="btn" id="liveBtn" onclick="toggleLive()"><span class="live-dot hidden" id="liveDot"></span>Auto-Reload</button>
+  </div>
+</div>
+
+<div class="stats" id="statsBar">
+  <div class="stat"><div class="label">CPU Temp</div><div class="value cool" id="sCpuTemp">--</div></div>
+  <div class="stat"><div class="label">GPU Temp</div><div class="value cool" id="sGpuTemp">--</div></div>
+  <div class="stat"><div class="label">Max Temp</div><div class="value cool" id="sMaxTemp">--</div></div>
+  <div class="stat"><div class="label">CPU Fan</div><div class="value rpm" id="sCpuFan">--</div></div>
+  <div class="stat"><div class="label">GPU Fan</div><div class="value rpm" id="sGpuFan">--</div></div>
+  <div class="stat"><div class="label">CPU RPM</div><div class="value rpm" id="sCpuRpm">--</div></div>
+  <div class="stat"><div class="label">GPU RPM</div><div class="value rpm" id="sGpuRpm">--</div></div>
+  <div class="stat"><div class="label">Fan Mode</div><div class="value mode-ind" id="sMode">--</div></div>
+  <div class="stat" id="sPowerCard"><div class="label">CPU PL1</div><div class="value pwr-uncapped" id="sPower">--</div></div>
+  <div class="stat"><div class="label">GPU Power</div><div class="value rpm" id="sGpuPower">--</div></div>
+  <div class="stat"><div class="label">CPU Core EPP</div><div class="value epp-active" id="sCpuEpp">--</div></div>
+</div>
+
+<div class="session-summary hidden" id="summaryBar">
+  <div class="summary-card">Duration<div class="val" id="sumDuration">--</div></div>
+  <div class="summary-card">CPU Peak<div class="val" id="sumCpuPeak">--</div></div>
+  <div class="summary-card">GPU Peak<div class="val" id="sumGpuPeak">--</div></div>
+  <div class="summary-card">Time ≥90°C<div class="val" id="sumThrottle">--</div></div>
+  <div class="summary-card">Coupled %<div class="val" id="sumCoupled">--</div></div>
+  <div class="summary-card">Capped %<div class="val" id="sumCapped">--</div></div>
+</div>
+
+<div class="drop-zone" id="dropZone" ondrop="dropFile(event)" ondragover="dragOver(event)" ondragleave="dragLeave(event)" onclick="document.querySelector('#loadBtn input').click()">
+  <p>Drop <code>/var/log/acer_fan_telemetry.csv</code> here or click to load</p>
+  <div class="hint">CSV: timestamp, cpu_temp, gpu_temp, max_temp, cpu_fan_pct, gpu_fan_pct, cpu_rpm, gpu_rpm, mode, power, gpu_watts, pl1_watts, epp</div>
+</div>
+
+<div class="charts hidden" id="chartsArea">
+  <div class="chart-card">
+    <h2>Temperature (°C)</h2>
+    <div class="legend-hint">🔴 coupled zones · 🟠 power-capped zones</div>
+    <div class="chart-wrap"><canvas id="tempChart"></canvas></div>
+  </div>
+  <div class="chart-card">
+    <h2>Power (W)</h2>
+    <div class="legend-hint">🔴 coupled zones · 🟠 power-capped zones</div>
+    <div class="chart-wrap"><canvas id="powerChart"></canvas></div>
+  </div>
+  <div class="chart-card">
+    <h2>Fan Speed (%)</h2>
+    <div class="legend-hint">🔴 coupled · 🟠 capped</div>
+    <div class="chart-wrap"><canvas id="fanChart"></canvas></div>
+  </div>
+  <div class="chart-card">
+    <h2>Fan RPM</h2>
+    <div class="legend-hint">🔴 coupled · 🟠 capped</div>
+    <div class="chart-wrap"><canvas id="rpmChart"></canvas></div>
+  </div>
+</div>
+
+<script>
+let rawData=[], charts={}, rangeSeconds=300, liveInterval=null;
+
+const COLORS={
+  cpuTemp:'#f56565',
+  gpuTemp:'#ed8936',
+  cpuFan:'#63b3ed',
+  gpuFan:'#7c3aed',
+  cpuRpm:'#48bb78',
+  gpuRpm:'#38b2ac',
+  pl1Watts:'#fc8181',
+  gpuWatts:'#a3bffa'
+};
+
+function parseCSV(text){
+  const lines=text.trim().split('\n').filter(l=>l.trim());
+  if(lines.length<2)return[];
+  const rows=[];
+  for(let i=1;i<lines.length;i++){
+    const c=lines[i].split(',');
+    if(c.length<9)continue;
+    
+    const cpu_temp = +c[1];
+    const gpu_temp = +c[2];
+    const max_temp = +c[3];
+    const cpu_fan_pct = +c[4];
+    const gpu_fan_pct = +c[5];
+    const cpu_rpm = +c[6];
+    const gpu_rpm = +c[7];
+    
+    // Safety check: skip row if core numeric metrics are invalid
+    if (isNaN(cpu_temp) || isNaN(gpu_temp) || isNaN(max_temp)) continue;
+    
+    const power = c.length>=10 ? c[9].trim() : 'uncapped';
+    
+    let gpu_watts = 0.0;
+    if (c.length >= 11) {
+      const val = parseFloat(c[10]);
+      if (!isNaN(val)) gpu_watts = val;
+    }
+    
+    let pl1_watts = (power==='capped'?65:115);
+    if (c.length >= 12) {
+      const val = parseInt(c[11], 10);
+      if (!isNaN(val)) pl1_watts = val;
+    }
+
+    const epp = c.length >= 13 ? c[12].trim() : 'performance';
+    
+    rows.push({
+      timestamp:new Date(c[0].replace(/-/g, '/').trim()), // support standard cross-browser Date parsing
+      cpu_temp, gpu_temp, max_temp,
+      cpu_fan_pct: isNaN(cpu_fan_pct) ? 0 : cpu_fan_pct,
+      gpu_fan_pct: isNaN(gpu_fan_pct) ? 0 : gpu_fan_pct,
+      cpu_rpm: isNaN(cpu_rpm) ? 0 : cpu_rpm,
+      gpu_rpm: isNaN(gpu_rpm) ? 0 : gpu_rpm,
+      mode:c[8].trim(),
+      power, gpu_watts, pl1_watts, epp
+    });
+  }
+  return rows;
+}
+
+function filterByRange(data){
+  if(!rangeSeconds||!data.length)return data;
+  const cutoff=new Date(data[data.length-1].timestamp.getTime()-rangeSeconds*1000);
+  return data.filter(d=>d.timestamp>=cutoff);
+}
+
+function updateStats(data){
+  if(!data.length)return;
+  const last=data[data.length-1];
+  const el=id=>document.getElementById(id);
+  const tempClass=t=>t>=82?'value hot':t>=70?'value warm':'value cool';
+  el('sCpuTemp').textContent=last.cpu_temp+'°C';el('sCpuTemp').className=tempClass(last.cpu_temp);
+  el('sGpuTemp').textContent=last.gpu_temp+'°C';el('sGpuTemp').className=tempClass(last.gpu_temp);
+  el('sMaxTemp').textContent=last.max_temp+'°C';el('sMaxTemp').className=tempClass(last.max_temp);
+  el('sCpuFan').textContent=last.cpu_fan_pct+'%';el('sCpuFan').className='value rpm';
+  el('sGpuFan').textContent=last.gpu_fan_pct+'%';el('sGpuFan').className='value rpm';
+  el('sCpuRpm').textContent=last.cpu_rpm.toLocaleString();el('sCpuRpm').className='value rpm';
+  el('sGpuRpm').textContent=last.gpu_rpm.toLocaleString();el('sGpuRpm').className='value rpm';
+  el('sMode').textContent=last.mode==='coupled'?'🔗 coupled':'🔀 independent';
+  el('sMode').className=last.mode==='coupled'?'value mode-coupled':'value mode-ind';
+  
+  const pl1 = last.pl1_watts !== undefined ? last.pl1_watts : (last.power==='capped'?65:115);
+  el('sPower').textContent='⚡ '+pl1+'W';
+  el('sPower').className=pl1<115?'value pwr-capped':'value pwr-uncapped';
+  const card=el('sPowerCard');
+  if(pl1<115) card.classList.add('capped-glow'); else card.classList.remove('capped-glow');
+
+  const gpuW = last.gpu_watts !== undefined ? last.gpu_watts : 0;
+  el('sGpuPower').textContent=gpuW.toFixed(1)+'W';
+
+  const eppVal = last.epp || 'performance';
+  if (eppVal === 'asymmetric_idle') {
+    el('sCpuEpp').textContent = '🌿 E-Cores';
+    el('sCpuEpp').className = 'value epp-idle';
+  } else {
+    el('sCpuEpp').textContent = '⚡ Active';
+    el('sCpuEpp').className = 'value epp-active';
+  }
+}
+
+function updateSummary(data){
+  if(!data.length)return;
+  document.getElementById('summaryBar').classList.remove('hidden');
+  const el=id=>document.getElementById(id);
+  const dur=Math.round((data[data.length-1].timestamp-data[0].timestamp)/1000);
+  const mins=Math.floor(dur/60),secs=dur%60;
+  el('sumDuration').textContent=`${mins}m ${secs}s (${data.length} samples)`;
+
+  let cpuPeak=0,gpuPeak=0,throttle=0,coupled=0,capped=0;
+  data.forEach(r=>{
+    if(r.cpu_temp>cpuPeak) cpuPeak=r.cpu_temp;
+    if(r.gpu_temp>gpuPeak) gpuPeak=r.gpu_temp;
+    if(r.max_temp>=90) throttle++;
+    if(r.mode==='coupled') coupled++;
+    const pl1 = r.pl1_watts !== undefined ? r.pl1_watts : (r.power==='capped'?65:115);
+    if(pl1<115) capped++;
+  });
+
+  el('sumCpuPeak').textContent=cpuPeak+'°C';
+  el('sumCpuPeak').className='val '+(cpuPeak>=90?'bad':cpuPeak>=80?'ok':'good');
+  el('sumGpuPeak').textContent=gpuPeak+'°C';
+  el('sumGpuPeak').className='val '+(gpuPeak>=90?'bad':gpuPeak>=80?'ok':'good');
+  const tPct=(throttle/data.length*100).toFixed(1);
+  el('sumThrottle').textContent=`${tPct}% (~${throttle*2}s)`;
+  el('sumThrottle').className='val '+(throttle>0?'bad':'good');
+  el('sumCoupled').textContent=(coupled/data.length*100).toFixed(1)+'%';
+  el('sumCoupled').className='val '+(coupled/data.length>.5?'ok':'good');
+  el('sumCapped').textContent=(capped/data.length*100).toFixed(1)+'%';
+  el('sumCapped').className='val '+(capped/data.length>.5?'ok':'good');
+}
+
+function makeCfg(datasets,yTitle,suggestedMax){
+  return{
+    type:'line',
+    data:{datasets},
+    options:{
+      responsive:true,maintainAspectRatio:false,animation:{duration:0},
+      interaction:{mode:'index',intersect:false},
+      plugins:{legend:{labels:{color:'#aaa',font:{size:11}}}},
+      scales:{
+        x:{type:'time',time:{tooltipFormat:'HH:mm:ss',displayFormats:{second:'HH:mm:ss',minute:'HH:mm'}},
+           ticks:{color:'#666',maxTicksLimit:12},grid:{color:'rgba(255,255,255,.04)'}},
+        y:{suggestedMin:0,suggestedMax,ticks:{color:'#666'},grid:{color:'rgba(255,255,255,.06)'},
+           title:{display:true,text:yTitle,color:'#888'}}
+      }
+    }
+  };
+}
+
+function buildCharts(data){
+  const d=filterByRange(data);
+  const ts=d.map(r=>r.timestamp);
+  const ds=(label,key,color)=>({label,data:d.map((r,i)=>({x:ts[i],y:r[key]!==undefined?r[key]:(key==='pl1_watts'?(r.power==='capped'?65:115):0)})),
+    borderColor:color,backgroundColor:color+'22',borderWidth:1.5,pointRadius:0,tension:.3,fill:false});
+
+  Object.values(charts).forEach(c=>c.destroy());
+
+  charts.temp=new Chart(document.getElementById('tempChart'),
+    makeCfg([ds('CPU','cpu_temp',COLORS.cpuTemp),ds('GPU','gpu_temp',COLORS.gpuTemp)],'°C',100));
+  
+  charts.power=new Chart(document.getElementById('powerChart'),
+    makeCfg([ds('CPU PL1 limit','pl1_watts',COLORS.pl1Watts),ds('GPU Power','gpu_watts',COLORS.gpuWatts)],'Watts',160));
+
+  charts.fan=new Chart(document.getElementById('fanChart'),
+    makeCfg([ds('CPU Fan %','cpu_fan_pct',COLORS.cpuFan),ds('GPU Fan %','gpu_fan_pct',COLORS.gpuFan)],'%',100));
+  
+  charts.rpm=new Chart(document.getElementById('rpmChart'),
+    makeCfg([ds('CPU RPM','cpu_rpm',COLORS.cpuRpm),ds('GPU RPM','gpu_rpm',COLORS.gpuRpm)],'RPM'));
+
+  // Draw coupled + power-capped zones as colored bands
+  addZoneBands(charts.temp,d);
+  addZoneBands(charts.power,d);
+  addZoneBands(charts.fan,d);
+  addZoneBands(charts.rpm,d);
+}
+
+function addZoneBands(chart,data){
+  const plugin={id:'zoneBands',beforeDraw(chart){
+    const ctx=chart.ctx,xScale=chart.scales.x,yScale=chart.scales.y;
+    const top=yScale.top,h=yScale.bottom-yScale.top;
+
+    // Draw coupled zones (red tint)
+    ctx.save();
+    ctx.fillStyle='rgba(245,101,101,0.07)';
+    drawBands(ctx,xScale,data,r=>r.mode==='coupled',top,h);
+
+    // Draw power-capped zones (orange tint, top stripe)
+    ctx.fillStyle='rgba(246,173,85,0.12)';
+    drawBands(ctx,xScale,data,r=> (r.pl1_watts !== undefined ? r.pl1_watts < 115 : r.power === 'capped'),top,h*0.08);
+    ctx.restore();
+  }};
+  chart.config.plugins=[plugin];chart.update();
+}
+
+function drawBands(ctx,xScale,data,testFn,top,height){
+  let inZone=false,startX=0;
+  data.forEach((r,i)=>{
+    const x=xScale.getPixelForValue(r.timestamp);
+    if(testFn(r)&&!inZone){inZone=true;startX=x}
+    else if(!testFn(r)&&inZone){ctx.fillRect(startX,top,x-startX,height);inZone=false}
+  });
+  if(inZone){ctx.fillRect(startX,top,xScale.getPixelForValue(data[data.length-1].timestamp)-startX,height)}
+}
+
+function render(data){
+  rawData=data;
+  document.getElementById('dropZone').classList.add('hidden');
+  document.getElementById('chartsArea').classList.remove('hidden');
+  updateStats(data);updateSummary(data);buildCharts(data);
+}
+
+function loadFile(e){const f=e.target.files[0];if(!f)return;
+  f.text().then(t=>render(parseCSV(t)))}
+
+function dropFile(e){e.preventDefault();document.getElementById('dropZone').classList.remove('drag');
+  const f=e.dataTransfer.files[0];if(f)f.text().then(t=>render(parseCSV(t)))}
+function dragOver(e){e.preventDefault();document.getElementById('dropZone').classList.add('drag')}
+function dragLeave(e){document.getElementById('dropZone').classList.remove('drag')}
+
+function setRange(btn){
+  document.querySelectorAll('.time-range .btn').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');rangeSeconds=+btn.dataset.range;
+  if(rawData.length){buildCharts(rawData);updateSummary(filterByRange(rawData))}
+}
+
+function toggleLive(){
+  const dot=document.getElementById('liveDot'),btn=document.getElementById('liveBtn');
+  if(liveInterval){clearInterval(liveInterval);liveInterval=null;
+    dot.classList.add('hidden');btn.classList.remove('active');return}
+  btn.classList.add('active');dot.classList.remove('hidden');
+  liveInterval=setInterval(()=>{
+    fetch('/var/log/acer_fan_telemetry.csv').then(r=>r.ok?r.text():null)
+      .then(t=>{if(t)render(parseCSV(t))}).catch(()=>{});
+  },3000);
+}
+</script>
+</body>
+</html>

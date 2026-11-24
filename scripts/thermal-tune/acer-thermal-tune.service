@@ -1,0 +1,12 @@
+[Unit]
+Description=Acer Predator Thermal Tuning (RAPL Power Limits)
+Before=acer-fan-curve.service
+ConditionPathExists=/sys/class/powercap/intel-rapl:0/constraint_0_power_limit_uw
+
+[Service]
+Type=oneshot
+ExecStart=/opt/damx/acer-thermal-tune.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
