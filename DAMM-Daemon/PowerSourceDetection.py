@@ -10,6 +10,9 @@ from typing import Optional
 # Get logger from main daemon
 log = logging.getLogger("DAMXDaemon")
 
+LEGACY_PROFILE = "/sys/firmware/acpi/platform_profile"
+PROFILE_CLASS = "/sys/class/platform-profile"
+
 class PowerSourceDetector:
     """Detects power source and manages automatic mode switching"""
 
@@ -47,10 +50,36 @@ class PowerSourceDetector:
             self.current_source = is_plugged_in
             self._handle_power_change(is_plugged_in)
 
+        self._sync_platform_profiles()
+
         # Schedule next check
         self.timer = Timer(self.check_interval, self.check_power_source)
         self.timer.daemon = True
         self.timer.start()
+
+    def _sync_platform_profiles(self):
+        """Re-apply the acer-wmi profile to every handler when they disagree.
+
+        The mode key changes the acer-wmi profile in the EC directly, so other
+        handlers (e.g. amd-pmf) keep the old one, the shared profile reads
+        "custom" and power-profiles-daemon stops following it.
+        """
+        try:
+            with open(LEGACY_PROFILE) as f:
+                if f.read().strip() != "custom":
+                    return
+            for entry in os.scandir(PROFILE_CLASS):
+                with open(os.path.join(entry.path, "name")) as f:
+                    if f.read().strip() != "acer-wmi":
+                        continue
+                with open(os.path.join(entry.path, "profile")) as f:
+                    profile = f.read().strip()
+                with open(LEGACY_PROFILE, "w") as f:
+                    f.write(profile)
+                log.info(f"Synced platform profile handlers to {profile}")
+                return
+        except OSError as e:
+            log.debug(f"Could not sync platform profiles: {e}")
 
     def _is_ac_connected(self) -> Optional[bool]:
         """Check if AC power is connected"""
@@ -149,7 +178,7 @@ class PowerSourceDetector:
             # On battery power - enforce balanced or eco mode
             log.info("Switched to battery power")
 
-            if current_profile not in ["balanced", "quiet", "power-saver"]:
+            if current_profile not in ["balanced", "quiet", "low-power"]:
                 # If current profile isn't battery-friendly, switch to balanced
                 if "balanced" in available_profiles:
                     log.info("Auto-switching to balanced mode for battery power")
@@ -157,8 +186,8 @@ class PowerSourceDetector:
                 elif "quiet" in available_profiles:
                     log.info("Auto-switching to quiet mode for battery power")
                     self.manager.set_thermal_profile("quiet")
-                elif "power-saver" in available_profiles:
-                    log.info("Auto-switching to power-saver mode for battery power")
-                    self.manager.set_thermal_profile("power-saver")
+                elif "low-power" in available_profiles:
+                    log.info("Auto-switching to low-power mode for battery power")
+                    self.manager.set_thermal_profile("low-power")
                 else:
                     log.warning("No battery-friendly thermal profile available")
